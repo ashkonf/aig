@@ -1,0 +1,19 @@
+[project]
+name = "gai"
+version = "0.1.0"
+description = "AI‑enhanced git wrapper"
+authors = [
+    { name = "Ashkon Farhangi", email = "ashkon.f@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "google-generativeai",
+    "python-dotenv",
+    "pytest",
+    "pre-commit>=4.2.0",
+]
+
+[project.scripts]
+gai = "main:main"
+

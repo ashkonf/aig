@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 
 import argparse
+import json
 import os
+import shutil
 import subprocess
 import sys
 from enum import Enum
 from typing import Callable
+
 import google.generativeai as genai
 from dotenv import load_dotenv
+from google.generativeai.types import HarmBlockThreshold, HarmCategory
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
@@ -52,7 +56,7 @@ def get_or_prompt_for_api_key() -> str:
 
 API_KEY: str | None = get_or_prompt_for_api_key()
 genai.configure(api_key=API_KEY)  # type: ignore
-MODEL_NAME: str = os.getenv("MODEL_NAME") or "gemini-2.5-pro-latest"
+MODEL_NAME: str = os.getenv("MODEL_NAME") or "gemini-1.5-pro-latest"
 _model: genai.GenerativeModel = genai.GenerativeModel(MODEL_NAME)  # type: ignore
 
 
@@ -62,6 +66,9 @@ class Command(str, Enum):
     BLAME = "blame"
     CONFIG = "config"
     TEST = "test"
+    STASH = "stash"
+    SUBMIT = "submit"
+    REVIEW = "review"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -130,6 +137,12 @@ def ask_gemini(prompt: str, max_tokens: int = 400) -> str:
                 "temperature": 0.3,
                 "max_output_tokens": max_tokens,
             },
+            safety_settings={
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+            },
         )
         return response.text.strip()
     except Exception as e:
@@ -142,6 +155,17 @@ def commit_message_from_diff(diff: str) -> str:
     """Return a commit message from a diff using Gemini."""
     prompt = (
         "You are an expert developer. Write a concise, clear gai commit message "
+        "(imperative mood, ≤ 72 chars in the subject) for the following diff. "
+        "Start the subject line with a single, relevant, positive emoji.\n\n"
+        f"<diff>\n{diff}\n</diff>"
+    )
+    return ask_gemini(prompt, max_tokens=60)
+
+
+def stash_name_from_diff(diff: str) -> str:
+    """Return a stash name from a diff."""
+    prompt = (
+        "You are an expert developer. Write a concise, clear stash message "
         "(imperative mood, ≤ 72 chars in the subject) for the following diff. "
         "Start the subject line with a single, relevant, positive emoji.\n\n"
         f"<diff>\n{diff}\n</diff>"
@@ -171,6 +195,35 @@ def explain_blame_output(blame: str) -> str:
     return ask_gemini(prompt, max_tokens=100)
 
 
+def code_review_from_diff(diff: str) -> str:
+    """Return a code review from a diff."""
+    prompt = (
+        "You are an expert developer. Review the following code changes and "
+        "provide feedback. Focus on identifying potential bugs, performance "
+        "issues, and areas for improvement. Use a positive and constructive "
+        "tone, with relevant emojis:\n\n"
+        f"<diff>\n{diff}\n</diff>"
+    )
+    return ask_gemini(prompt, max_tokens=1000)
+
+
+def pr_summary_from_diff(diff: str) -> str:
+    """Return a PR title and body from a diff."""
+    prompt = (
+        "You are an expert developer. Based on the following diff, generate a "
+        "pull request title and a short summary body in JSON format. The JSON "
+        'should have two keys: "title" and "body". The title should start with '
+        "a relevant, positive emoji.\n\n"
+        f"<diff>\n{diff}\n</diff>"
+    )
+    return ask_gemini(prompt, max_tokens=250)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def _install_pre_commit_hooks_if_needed():
     """Install pre-commit hooks if they are not already installed."""
     if not os.path.exists(os.path.join(".git", "hooks", "pre-commit")):
@@ -191,12 +244,7 @@ def _install_pre_commit_hooks_if_needed():
             )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# CLI
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def _replace_git_with_gai(text: str) -> str:
+def _postprocess_git_output(text: str) -> str:
     """Replace 'git' with 'gai' in the text."""
     return text.replace("git", "gai").replace("Git", "gai")
 
@@ -219,36 +267,91 @@ def _handle_commit(args: argparse.Namespace, extra_args: list[str]) -> None:
     """Handle the 'commit' command."""
     _install_pre_commit_hooks_if_needed()
 
-    diff = get_diff(extra_args)
-    if not diff.strip():
-        print("⚠️ No staged changes found.")
-        return
-    msg = commit_message_from_diff(diff)
-    print("\nSuggested commit message:\n")
-    print(msg)
+    if args.message:
+        msg = args.message
+    else:
+        diff = get_diff(extra_args)
+        if not diff.strip():
+            print("⚠️ No staged changes found.")
+            return
+        msg = commit_message_from_diff(diff)
+        print("\nSuggested commit message:\n")
+        print(msg)
 
-    should_commit = args.yes or input(
-        "\nUse this commit message? [Y/n] "
-    ).strip().lower() in ("", "y", "yes")
+    # If message is provided, don't ask for confirmation
+    if args.message:
+        should_commit = True
+    else:
+        should_commit = args.yes or input(
+            "\nUse this commit message? [Y/n] "
+        ).strip().lower() in ("", "y", "yes")
+
     if should_commit:
-        result = subprocess.run(
-            ["git", "commit", "-m", msg],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        if result.stdout:
-            print(_replace_git_with_gai(result.stdout))
-        if result.stderr:
-            print(_replace_git_with_gai(result.stderr), file=sys.stderr)
-        print("✅ Commit successful.")
+        try:
+            # Use -F - to allow for multi-line commit messages
+            commit_cmd = ["git", "commit"]
+            env = os.environ.copy()
+            if args.date:
+                commit_cmd.extend(["--date", args.date])
+                env["GIT_AUTHOR_DATE"] = args.date
+                env["GIT_COMMITTER_DATE"] = args.date
+            commit_cmd.extend(["-F", "-"])
+            if args.yes:
+                commit_cmd.append("--yes")
+            commit_cmd.extend(extra_args)
+            result = subprocess.run(
+                commit_cmd,
+                input=msg,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            if result.stdout:
+                print(_postprocess_git_output(result.stdout))
+            if result.stderr:
+                print(_postprocess_git_output(result.stderr), file=sys.stderr)
+            print("✅ Commit successful.")
+        except subprocess.CalledProcessError as e:
+            print("❌ Commit failed.", file=sys.stderr)
+            if e.stdout:
+                print(_postprocess_git_output(e.stdout), file=sys.stderr)
+            if e.stderr:
+                print(_postprocess_git_output(e.stderr), file=sys.stderr)
+            sys.exit(1)
+
+
+def _handle_stash(args: argparse.Namespace, extra_args: list[str]) -> None:
+    """Handle the 'stash' command."""
+    if args.message:
+        msg = args.message
+    else:
+        diff = get_diff(extra_args)
+        if not diff.strip():
+            print("⚠️ No changes to stash.")
+            return
+        msg = stash_name_from_diff(diff)
+        print("\nSuggested stash message:\n")
+        print(msg)
+
+    # If message is provided, don't ask for confirmation
+    if args.message:
+        should_stash = True
+    else:
+        should_stash = args.yes or input(
+            "\nUse this stash message? [Y/n] "
+        ).strip().lower() in ("", "y", "yes")
+
+    if should_stash:
+        run(["git", "stash", "push", "-m", msg] + extra_args)
+        print("✅ Stashed successfully.")
 
 
 def _handle_log(args: argparse.Namespace, extra_args: list[str]) -> None:
     """Handle the 'log' command."""
     log = get_log(extra_args)
     print("\nRecent commits:\n")
-    print(_replace_git_with_gai(log))
+    print(_postprocess_git_output(log))
     summary = summarize_commit_log(log)
     print("\n▶ Summary:\n")
     print(summary)
@@ -258,10 +361,21 @@ def _handle_blame(args: argparse.Namespace, extra_args: list[str]) -> None:
     """Handle the 'blame' command."""
     blame = get_blame(args.file, args.line, extra_args)
     print("\nBlame output:\n")
-    print(_replace_git_with_gai(blame))
+    print(_postprocess_git_output(blame))
     explanation = explain_blame_output(blame)
     print("\n▶ Explanation:\n")
     print(explanation)
+
+
+def _handle_review(args: argparse.Namespace, extra_args: list[str]) -> None:
+    """Handle the 'review' command."""
+    diff = get_diff(extra_args)
+    if not diff.strip():
+        print("⚠️ No staged changes found to review.")
+        return
+    review = code_review_from_diff(diff)
+    print("\n▶ Code Review:\n")
+    print(review)
 
 
 def _handle_config(args: argparse.Namespace) -> None:
@@ -273,6 +387,65 @@ def _handle_config(args: argparse.Namespace) -> None:
         else:
             run(["git", "config", "--unset", "gai.branch-prefix"])
             print("✅ Branch prefix unset.")
+
+
+def _check_gh_installed():
+    """Check if gh is installed."""
+    if not shutil.which("gh"):
+        sys.exit(
+            "❌ The 'gh' command-line tool is not installed. "
+            "Please install it to use the 'submit' command. "
+            "See: https://cli.github.com/"
+        )
+
+
+def _handle_submit(args: argparse.Namespace, extra_args: list[str]) -> None:
+    """Handle the 'submit' command."""
+    _check_gh_installed()
+
+    # Get the diff from the commits that are not on the main branch
+    try:
+        remote = run(["git", "remote"]).strip().split("\n")[0]
+        main_branch = f"{remote}/main"  # Assuming 'main' is the target branch
+        diff = run(["git", "diff", f"$(git merge-base HEAD {main_branch})..HEAD"])
+    except subprocess.CalledProcessError as e:
+        sys.exit(f"❌ Could not get diff from main branch: {e}")
+
+    if not diff.strip():
+        sys.exit("⚠️ No changes to submit.")
+
+    # Generate the PR title and body
+    summary_json = pr_summary_from_diff(diff)
+    try:
+        # The output from Gemini might be enclosed in ```json ... ```, so we strip that.
+        if summary_json.startswith("```json"):
+            summary_json = summary_json[7:-4]
+        summary = json.loads(summary_json)
+        title = summary["title"]
+        body = summary["body"]
+    except (json.JSONDecodeError, KeyError) as e:
+        sys.exit(f"❌ Could not parse PR summary from Gemini: {e}\n{summary_json}")
+
+    print("\nSuggested PR title:\n")
+    print(title)
+    print("\nSuggested PR body:\n")
+    print(body)
+
+    should_submit = args.yes or input(
+        "\nUse this title and body? [Y/n] "
+    ).strip().lower() in (
+        "",
+        "y",
+        "yes",
+    )
+
+    if should_submit:
+        try:
+            cmd = ["gh", "pr", "create", "--title", title, "--body", body] + extra_args
+            run(cmd)
+            print("✅ Pull request submitted successfully.")
+        except subprocess.CalledProcessError as e:
+            sys.exit(f"❌ Failed to create pull request: {e}")
 
 
 def _handle_git_passthrough():
@@ -294,10 +467,10 @@ def _handle_git_passthrough():
             ["git"] + sys.argv[1:], capture_output=True, text=True, check=False
         )
         if result.stdout:
-            print(_replace_git_with_gai(result.stdout))
+            print(_postprocess_git_output(result.stdout))
         if result.stderr:
             print(
-                _replace_git_with_gai(result.stderr),
+                _postprocess_git_output(result.stderr),
                 file=sys.stderr,
             )
         if result.returncode != 0:
@@ -326,12 +499,31 @@ def main() -> None:
     commit_p.add_argument(
         "-m", "--message", help="Provide a commit message instead of generating one"
     )
+    commit_p.add_argument("--date", help="Override the date of the commit")
+
+    stash_p = subs.add_parser(
+        Command.STASH, help="Generate a stash message from staged changes"
+    )
+    stash_p.add_argument(
+        "-y", "--yes", action="store_true", help="Stash without confirmation"
+    )
+    stash_p.add_argument(
+        "-m", "--message", help="Provide a stash message instead of generating one"
+    )
     subs.add_parser(Command.LOG, help="Summarize the last 10 commits")
     subs.add_parser(Command.TEST, help="Run pre-commit hooks on all files")
+    subs.add_parser(Command.REVIEW, help="Request a code review on staged changes")
 
     blame_p = subs.add_parser(Command.BLAME, help="Explain a line change")
     blame_p.add_argument("file", help="Path to the file")
     blame_p.add_argument("line", help="Line number")
+
+    subs.add_parser(
+        Command.SUBMIT,
+        help="Create a pull request with an AI-generated title and description",
+    ).add_argument(
+        "-y", "--yes", action="store_true", help="Submit without confirmation"
+    )
 
     config_p = subs.add_parser(Command.CONFIG, help="Set configuration for gai")
     config_p.add_argument(
@@ -343,12 +535,22 @@ def main() -> None:
 
     handlers: dict[Command, Callable[..., None]] = {
         Command.COMMIT: _handle_commit,
+        Command.STASH: _handle_stash,
         Command.LOG: _handle_log,
         Command.BLAME: _handle_blame,
         Command.CONFIG: _handle_config,
         Command.TEST: _handle_test,
+        Command.REVIEW: _handle_review,
+        Command.SUBMIT: _handle_submit,
     }
-    if args.command in (Command.COMMIT, Command.LOG, Command.BLAME):
+    if args.command in (
+        Command.COMMIT,
+        Command.LOG,
+        Command.BLAME,
+        Command.STASH,
+        Command.REVIEW,
+        Command.SUBMIT,
+    ):
         handlers[args.command](args, extra_args)
     elif args.command in (Command.TEST,):
         handlers[args.command]()

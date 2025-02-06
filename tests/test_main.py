@@ -90,6 +90,14 @@ def test_explain_blame_output(mock_ask_gemini: Mock) -> None:
     mock_ask_gemini.assert_called_once()
 
 
+def test_code_review_from_diff(mock_ask_gemini: Mock) -> None:
+    """Test the `code_review_from_diff` function."""
+    mock_ask_gemini.return_value = "LGTM!"
+    review = main.code_review_from_diff("some diff")
+    assert "LGTM!" in review
+    mock_ask_gemini.assert_called_once()
+
+
 @patch("os.path.exists")
 @patch("subprocess.run")
 def test_install_pre_commit_hooks_if_needed(mock_run, mock_exists):
@@ -122,7 +130,9 @@ def test_install_pre_commit_hooks_if_needed_already_installed(mock_run, mock_exi
 @patch("main.commit_message_from_diff", return_value="feat: Test commit")
 @patch("main.get_diff", return_value="some diff")
 @patch("main._install_pre_commit_hooks_if_needed", return_value=None)
+@patch("os.environ.copy", return_value={})
 def test_main_commit_yes(
+    mock_env_copy: Mock,
     mock_install_hooks: Mock,
     mock_get_diff: Mock,
     mock_commit_message: Mock,
@@ -134,17 +144,73 @@ def test_main_commit_yes(
         mock_get_diff.assert_called_once()
         mock_commit_message.assert_called_with("some diff")
         mock_subprocess_run.assert_called_with(
-            ["git", "commit", "-m", "feat: Test commit"],
+            ["git", "commit", "-F", "-", "--yes"],
+            input="feat: Test commit",
             check=True,
             capture_output=True,
             text=True,
+            env={},
+        )
+
+
+@patch("subprocess.run")
+@patch("main.commit_message_from_diff", return_value="feat: Test commit")
+@patch("main.get_diff", return_value="some diff")
+@patch("main._install_pre_commit_hooks_if_needed", return_value=None)
+@patch("os.environ.copy", return_value={})
+def test_main_commit_with_date(
+    mock_env_copy: Mock,
+    mock_install_hooks: Mock,
+    mock_get_diff: Mock,
+    mock_commit_message: Mock,
+    mock_subprocess_run: Mock,
+) -> None:
+    """Test the main function with `commit --date`."""
+    test_date = "2023-01-01T12:00:00"
+    with patch("sys.argv", ["gai", "commit", "--yes", "--date", test_date]):
+        main.main()
+        mock_get_diff.assert_called_once()
+        mock_commit_message.assert_called_with("some diff")
+        mock_subprocess_run.assert_called_with(
+            ["git", "commit", "--date", test_date, "-F", "-", "--yes"],
+            input="feat: Test commit",
+            check=True,
+            capture_output=True,
+            text=True,
+            env={"GIT_AUTHOR_DATE": test_date, "GIT_COMMITTER_DATE": test_date},
+        )
+
+
+@patch("subprocess.run")
+@patch("main.get_diff", return_value="some diff")
+@patch("main._install_pre_commit_hooks_if_needed", return_value=None)
+@patch("os.environ.copy", return_value={})
+def test_main_commit_with_message(
+    mock_env_copy: Mock,
+    mock_install_hooks: Mock,
+    mock_get_diff: Mock,
+    mock_subprocess_run: Mock,
+) -> None:
+    """Test the main function with `commit -m`."""
+    with patch("sys.argv", ["gai", "commit", "-m", "my custom message"]):
+        main.main()
+        mock_get_diff.assert_not_called()
+        mock_subprocess_run.assert_called_with(
+            ["git", "commit", "-F", "-"],
+            input="my custom message",
+            check=True,
+            capture_output=True,
+            text=True,
+            env={},
         )
 
 
 @patch("main.get_diff", return_value="some diff")
 @patch("main.commit_message_from_diff", return_value="feat: Test commit")
 @patch("main._install_pre_commit_hooks_if_needed", return_value=None)
+@patch("os.environ.copy", return_value={})
 def test_main_commit_interactive_yes(
+    mock_env_copy: Mock,
     mock_install_hooks: Mock,
     mock_commit_message: Mock,
     mock_get_diff: Mock,
@@ -157,17 +223,21 @@ def test_main_commit_interactive_yes(
         main.main()
         mock_input.assert_called_once()
         mock_subprocess_run.assert_called_with(
-            ["git", "commit", "-m", "feat: Test commit"],
+            ["git", "commit", "-F", "-"],
+            input="feat: Test commit",
             check=True,
             capture_output=True,
             text=True,
+            env={},
         )
 
 
 @patch("main.get_diff", return_value="some diff")
 @patch("main.commit_message_from_diff", return_value="feat: Test commit")
 @patch("main._install_pre_commit_hooks_if_needed")
+@patch("os.environ.copy", return_value={})
 def test_main_commit_interactive_no(
+    mock_env_copy: Mock,
     mock_install_hooks: Mock,
     mock_commit_message: Mock,
     mock_get_diff: Mock,
@@ -202,6 +272,16 @@ def test_main_blame(mock_explain: Mock, mock_get_blame: Mock) -> None:
         mock_explain.assert_called_with("some blame")
 
 
+@patch("main.get_diff", return_value="some diff")
+@patch("main.code_review_from_diff", return_value="LGTM!")
+def test_main_review(mock_review: Mock, mock_get_diff: Mock) -> None:
+    """Test the main function with `review`."""
+    with patch("sys.argv", ["gai", "review"]):
+        main.main()
+        mock_get_diff.assert_called_once()
+        mock_review.assert_called_with("some diff")
+
+
 @patch("main.get_diff", return_value="")
 @patch("main._install_pre_commit_hooks_if_needed")
 def test_main_commit_no_changes(
@@ -212,6 +292,38 @@ def test_main_commit_no_changes(
         main.main()
         mock_get_diff.assert_called_once()
         mock_subprocess_run.assert_not_called()
+
+
+@patch("main.run")
+@patch("main.stash_name_from_diff", return_value="feat: Test stash")
+@patch("main.get_diff", return_value="some diff")
+def test_main_stash_interactive_yes(
+    mock_get_diff: Mock, mock_stash_name: Mock, mock_run: Mock, mock_input: Mock
+) -> None:
+    """Test the main function with `stash` and interactive 'yes'."""
+    mock_input.return_value = "y"
+    with patch("sys.argv", ["gai", "stash"]):
+        main.main()
+        mock_get_diff.assert_called_once()
+        mock_stash_name.assert_called_with("some diff")
+        mock_input.assert_called_once()
+        mock_run.assert_called_with(["git", "stash", "push", "-m", "feat: Test stash"])
+
+
+@patch("main.run")
+@patch("main.stash_name_from_diff", return_value="feat: Test stash")
+@patch("main.get_diff", return_value="some diff")
+def test_main_stash_interactive_no(
+    mock_get_diff: Mock, mock_stash_name: Mock, mock_run: Mock, mock_input: Mock
+) -> None:
+    """Test the main function with `stash` and interactive 'no'."""
+    mock_input.return_value = "n"
+    with patch("sys.argv", ["gai", "stash"]):
+        main.main()
+        mock_get_diff.assert_called_once()
+        mock_stash_name.assert_called_with("some diff")
+        mock_input.assert_called_once()
+        mock_run.assert_not_called()
 
 
 # ------------------------------------------------------------------------------

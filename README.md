@@ -1,6 +1,6 @@
 <div align="center">
 
-# GitAI
+# 🤖 GitAI
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Pytest](https://img.shields.io/badge/pytest-✓-brightgreen)](https://docs.pytest.org)
@@ -15,7 +15,7 @@ write better commit messages, understand your commit history, and find out why c
 
 </div>
 
-## Table of Contents
+## 🗺️ Table of Contents
 
 - [Features](#features)
 - [Installation](#installation)
@@ -24,24 +24,36 @@ write better commit messages, understand your commit history, and find out why c
   - [Branch Prefix](#branch-prefix)
 - [Usage](#usage)
   - [`gai commit`](#gai-commit)
+  - [`gai stash`](#gai-stash)
   - [`gai log`](#gai-log)
   - [`gai blame <file> <line>`](#gai-blame-file-line)
+  - [`gai review`](#gai-review)
   - [`gai config`](#gai-config)
   - [`gai test`](#gai-test)
   - [Git Passthrough](#git-passthrough)
 - [Development](#development)
 - [License](#license)
+- [Contributing](#contributing)
 
-## Features
 
-- **`gai commit`**: Generates a concise and conventional commit message from your staged changes.
-- **`gai log`**: Summarizes the last 10 commits in natural language.
-- **`gai blame <file> <line>`**: Explains why a specific line of code was changed.
-- **`gai config`**: Manages configuration settings, like branch prefixes.
-- **`gai test`**: Runs pre-commit hooks on all files.
-- **Git Passthrough**: Use `gai` as a drop-in replacement for `git`. Any command not native to `gai` is passed directly to `git`.
+## ✨ Features
 
-## Installation
+- ✍️ **`gai commit`**: Generates a concise and conventional commit message from your staged changes.
+- 📦 **`gai stash`**: Generates a stash message from your unstaged changes.
+- 📜 **`gai log`**: Summarizes the last 10 commits in natural language.
+- 🕵️ **`gai blame <file> <line>`**: Explains why a specific line of code was changed.
+- 👨‍💻 **`gai review`**: Provides a code review on your staged changes.
+- ✨ **`gai submit`**: Creates a pull request with an AI-generated title and description.
+- 🔧 **`gai config`**: Manages configuration settings, like branch prefixes.
+- ✅ **`gai test`**: Runs pre-commit hooks on all files.
+- 👉 **Git Passthrough**: Use `gai` as a drop-in replacement for `git`. Any command not native to `gai` is passed directly to `git`.
+
+## 🚀 Installation
+
+`gai` is a command-line tool that can be installed using `pipx`. If you don't have `pipx` installed, you can install it with `pip`:
+```bash
+pip install --user pipx
+```
 
 1.  Clone the repository:
     ```bash
@@ -49,12 +61,12 @@ write better commit messages, understand your commit history, and find out why c
     cd gai
     ```
 
-2.  Install the dependencies:
+2.  Install the package:
     ```bash
-    pip install .
+    pipx install .
     ```
 
-## Configuration
+## ⚙️ Configuration
 
 ### API Key
 
@@ -75,7 +87,7 @@ write better commit messages, understand your commit history, and find out why c
 
 You can configure a prefix for all new branches created with `gai checkout -b` or `gai branch`. This is useful for teams that follow a branch naming convention (e.g. `username/`). See the [`gai config`](#gai-config) section for more details.
 
-## Usage
+## 👨‍💻 Usage
 
 ### `gai commit`
 
@@ -86,9 +98,21 @@ Generates a commit message based on your staged changes.
     ```bash
     gai commit
     ```
-3.  The tool will suggest a commit message. Review it and type 'y' to accept and commit. Use the `-y` flag to bypass the confirmation prompt.
+3.  The tool will suggest a commit message. Review it and type 'y' to accept and commit. Use the `-y` flag to bypass the confirmation prompt. You can also use the `--date` flag to override the author date of the commit (e.g. `gai commit --date="2025-01-01 12:00:00"`).
 
 The first time `gai commit` is run, it will install pre-commit hooks if they have not been installed already.
+
+### `gai stash`
+
+Generates a stash message based on your unstaged changes.
+
+1.  Make changes to your tracked files.
+2.  Run the command:
+    ```bash
+    gai stash
+    ```
+3.  The tool will suggest a stash message. Review it and type 'y' to accept and stash. Use the `-y` flag to bypass the confirmation prompt.
+
 
 ### `gai log`
 
@@ -106,15 +130,35 @@ Explains *why* a specific line of code was last modified by analyzing the `git b
 gai blame main.py 115
 ```
 
+### `gai review`
+
+Provides a code review on your staged changes.
+
+1.  Run the command:
+    ```bash
+    gai review
+    ```
+
+### `gai submit`
+
+Creates a pull request with an AI-generated title and body. This command requires the `gh` command-line tool to be installed.
+
+1.  Push your changes to a remote branch.
+2.  Run the command:
+    ```bash
+    gai submit
+    ```
+3. The tool will suggest a title and body. Review them and type 'y' to accept and create the pull request. Use the `-y` flag to bypass the confirmation prompt.
+
 ### `gai config`
 
 Sets configuration options for `gai`.
 
 To set a branch prefix:
 ```bash
-gai config --branch-prefix "feature/"
+gai config --branch-prefix "ashkonf"
 ```
-Now, when you run `gai checkout -b new-feature` or `gai branch new-feature`, the branch will be named `feature/new-feature`.
+Now, when you run `gai checkout -b new-feature` or `gai branch new-feature`, the branch will be named `ashkonf/new-feature`.
 
 To unset the branch prefix:
 ```bash
@@ -135,14 +179,14 @@ gai test
 
 For example, `gai status` is equivalent to `git status`.
 
-## Development
+## 🛠️ Development
 
 To set up the development environment, follow these steps:
 
 1. Clone the repository and navigate into the directory.
 2. Install the project in editable mode with development dependencies:
    ```bash
-   pip install -e .[dev]
+   pipx install -e .[dev]
    ```
 3. The project uses the following development tools:
     - `pytest` for running tests.
@@ -150,13 +194,36 @@ To set up the development environment, follow these steps:
     - `ruff` for linting and formatting.
     - `pre-commit` to enforce standards before each commit.
 
-To run the test suite, you can either use `pytest` or the built-in `gai` command:
+To run the test suite:
 ```bash
-pytest
-# or
+uv run pytest
+```
+
+To run pre-commit hooks on all files:
+```bash
 gai test
 ```
 
-## License
+## 📄 License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+## 🤝 Contributing
+
+Contributions are welcome! To get started:
+
+1. **Fork the repository** and create your branch from `main`.
+2. **Install development dependencies**:
+    ```bash
+    pipx install -e .[dev]
+    ```
+3. **Run tests and pre-commit hooks** before submitting a PR:
+    ```bash
+    uv run pytest
+    pre-commit run --all-files
+    ```
+4. **Open a pull request** with a clear description of your changes.
+
+Please ensure your code is well-tested and follows the existing style. For major changes, open an issue first to discuss your ideas.
+
+Thank you for helping improve `gai`!

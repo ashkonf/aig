@@ -3,6 +3,7 @@ import pytest
 import gai as main
 import sys
 import subprocess
+import runpy
 
 import importlib
 
@@ -204,7 +205,6 @@ def test_install_pre_commit_hooks_if_needed(mock_run, mock_exists):
     mock_run.assert_called_once_with(
         [sys.executable, "-m", "pre_commit", "install"],
         check=True,
-        capture_output=True,
         text=True,
     )
 
@@ -257,7 +257,6 @@ def test_main_commit_yes(
             ["git", "commit", "-F", "-", "--yes"],
             input="feat: Test commit",
             check=True,
-            capture_output=True,
             text=True,
             env={},
         )
@@ -285,7 +284,6 @@ def test_main_commit_with_date(
             ["git", "commit", "--date", test_date, "-F", "-", "--yes"],
             input="feat: Test commit",
             check=True,
-            capture_output=True,
             text=True,
             env={"GIT_AUTHOR_DATE": test_date, "GIT_COMMITTER_DATE": test_date},
         )
@@ -309,7 +307,6 @@ def test_main_commit_with_message(
             ["git", "commit", "-F", "-"],
             input="my custom message",
             check=True,
-            capture_output=True,
             text=True,
             env={},
         )
@@ -337,7 +334,6 @@ def test_main_commit_interactive_yes(
             ["git", "commit", "-F", "-"],
             input="feat: Test commit",
             check=True,
-            capture_output=True,
             text=True,
             env={},
         )
@@ -508,9 +504,7 @@ def test_git_passthrough(mock_run: Mock) -> None:
     with patch("sys.argv", ["gai", "status"]):
         with pytest.raises(SystemExit):
             main.main()
-    mock_run.assert_called_with(
-        ["git", "status"], capture_output=True, text=True, check=False
-    )
+    mock_run.assert_called_with(["git", "status"], text=True, check=False)
 
 
 @patch("gai.get_branch_prefix", return_value="feature")
@@ -524,7 +518,6 @@ def test_git_passthrough_branch_rewrite(
             main.main()
     mock_run.assert_called_with(
         ["git", "checkout", "-b", "feature/new-branch-1"],
-        capture_output=True,
         text=True,
         check=False,
     )
@@ -541,7 +534,6 @@ def test_git_passthrough_branch_rewrite_short(
             main.main()
     mock_run.assert_called_with(
         ["git", "branch", "feature/new-branch-2"],
-        capture_output=True,
         text=True,
         check=False,
     )
@@ -622,3 +614,248 @@ def test_main_test(mock_subprocess_run: Mock, mock_install_hooks: Mock) -> None:
             [sys.executable, "-m", "pre_commit", "run", "--all-files"],
             check=True,
         )
+
+
+@patch("gai.run")
+@patch(
+    "gai.pr_summary_from_diff",
+    return_value='```json\n{"title": "Test PR", "body": "PR body"}\n```',
+)
+@patch("gai.get_default_branch", return_value="main")
+@patch("gai._check_gh_installed", return_value=None)
+def test_main_submit_json_with_fences(
+    mock_check_gh: Mock,
+    mock_get_default_branch: Mock,
+    mock_pr_summary: Mock,
+    mock_run: Mock,
+    mock_input: Mock,
+) -> None:
+    """Test the main function with `submit` and a JSON response with fences."""
+    mock_input.return_value = "y"
+    mock_run.return_value = "diff"
+    with patch("sys.argv", ["gai", "submit"]):
+        main.main()
+    mock_run.assert_any_call(
+        ["gh", "pr", "create", "--title", "Test PR", "--body", "PR body"]
+    )
+
+
+@patch("gai.run")
+@patch("gai.pr_summary_from_diff", return_value='{"bad": "json"}')
+@patch("gai.get_default_branch", return_value="main")
+@patch("gai._check_gh_installed", return_value=None)
+def test_main_submit_bad_json(
+    mock_check_gh: Mock,
+    mock_get_default_branch: Mock,
+    mock_pr_summary: Mock,
+    mock_run: Mock,
+    mock_input: Mock,
+) -> None:
+    """Test the main function with `submit` and bad JSON."""
+    mock_input.return_value = "y"
+    mock_run.return_value = "diff"
+    with patch("sys.argv", ["gai", "submit"]):
+        with pytest.raises(SystemExit) as e:
+            main.main()
+    assert "Could not parse PR summary" in str(e.value)
+
+
+@patch("gai.get_branch_prefix", return_value="")
+@patch("subprocess.run")
+def test_git_passthrough_branch_rewrite_no_prefix(
+    mock_run: Mock, mock_get_branch_prefix: Mock
+) -> None:
+    """Test that `checkout -b` is not rewritten when no prefix is set."""
+    with patch("sys.argv", ["gai", "checkout", "-b", "new-branch-1"]):
+        with pytest.raises(SystemExit):
+            main.main()
+    mock_run.assert_called_with(
+        ["git", "checkout", "-b", "new-branch-1"],
+        text=True,
+        check=False,
+    )
+
+
+@patch("gai.get_diff", return_value="")
+def test_main_review_no_changes(mock_get_diff: Mock) -> None:
+    """Test the main function with `review` and no staged changes."""
+    with patch("sys.argv", ["gai", "review"]):
+        main.main()
+        mock_get_diff.assert_called_once()
+
+
+@patch("shutil.which", return_value=None)
+def test_check_gh_installed_not_found(mock_which: Mock) -> None:
+    """Test that `_check_gh_installed` exits if gh is not found."""
+    with pytest.raises(SystemExit) as e:
+        main._check_gh_installed()
+    assert "The 'gh' command-line tool is not installed" in str(e.value)
+
+
+@patch("gai.run", side_effect=subprocess.CalledProcessError(1, "cmd"))
+@patch("gai._check_gh_installed", return_value=None)
+def test_main_submit_diff_error(mock_check_gh: Mock, mock_run: Mock) -> None:
+    """Test the main function with `submit` and an error getting the diff."""
+    with patch("sys.argv", ["gai", "submit"]):
+        with pytest.raises(SystemExit) as e:
+            main.main()
+    assert "Could not get diff" in str(e.value)
+
+
+@patch("gai.run")
+@patch(
+    "gai.pr_summary_from_diff", return_value='{"title": "Test PR", "body": "PR body"}'
+)
+@patch("gai.get_default_branch", return_value="main")
+@patch("gai._check_gh_installed", return_value=None)
+def test_main_submit_gh_error(
+    mock_check_gh: Mock,
+    mock_get_default_branch: Mock,
+    mock_pr_summary: Mock,
+    mock_run: Mock,
+    mock_input: Mock,
+) -> None:
+    """Test the main function with `submit` and an error from gh."""
+
+    def run_side_effect(cmd):
+        if "diff" in cmd:
+            return "diff"
+        if "gh" in cmd:
+            raise subprocess.CalledProcessError(1, "cmd", "output", "stderr")
+        return ""
+
+    mock_input.return_value = "y"
+    mock_run.side_effect = run_side_effect
+    with patch("sys.argv", ["gai", "submit", "--yes"]):
+        with pytest.raises(SystemExit) as e:
+            main.main()
+    assert "Failed to create pull request" in str(e.value)
+
+
+@patch("subprocess.run", side_effect=FileNotFoundError)
+def test_git_passthrough_not_found(mock_run: Mock) -> None:
+    """Test that git passthrough exits if git is not found."""
+    with patch("sys.argv", ["gai", "status"]):
+        with pytest.raises(SystemExit) as e:
+            main.main()
+    assert "git is not installed" in str(e.value)
+
+
+def test_main_entrypoint() -> None:
+    """Test the main entrypoint."""
+    with patch("sys.argv", ["gai", "--help"]):
+        try:
+            runpy.run_module("gai.__main__", run_name="__main__")
+        except SystemExit as e:
+            assert e.code == 0
+
+
+@patch("gai.get_diff", return_value="")
+def test_main_stash_no_changes(mock_get_diff: Mock, mock_run: Mock) -> None:
+    """Test the main function with `stash` and no staged changes."""
+    with patch("sys.argv", ["gai", "stash"]):
+        main.main()
+        mock_get_diff.assert_called_once()
+        mock_run.assert_not_called()
+
+
+@patch("gai.get_default_branch", return_value="main")
+@patch("gai.get_diff", return_value=" ")
+@patch("gai._check_gh_installed", return_value=None)
+def test_main_submit_no_changes(
+    mock_check_gh: Mock, mock_get_diff: Mock, mock_get_default_branch: Mock
+) -> None:
+    """Test the main function with `submit` and no changes."""
+    with patch("sys.argv", ["gai", "submit"]):
+        with patch("gai.run") as mock_run:
+            mock_run.return_value = ""
+            with pytest.raises(SystemExit) as e:
+                main.main()
+    assert "No changes to submit" in str(e.value)
+
+
+@patch("gai.run")
+@patch(
+    "gai.pr_summary_from_diff", return_value='{"title": "Test PR", "body": "PR body"}'
+)
+@patch("gai.get_default_branch", return_value="main")
+@patch("gai._check_gh_installed", return_value=None)
+def test_main_submit_interactive_no(
+    mock_check_gh: Mock,
+    mock_get_default_branch: Mock,
+    mock_pr_summary: Mock,
+    mock_run: Mock,
+    mock_input: Mock,
+) -> None:
+    """Test the main function with `submit` and interactive 'no'."""
+    mock_input.return_value = "n"
+    mock_run.return_value = "diff"
+    with patch("sys.argv", ["gai", "submit"]):
+        main.main()
+    assert mock_run.call_count == 2
+
+
+@patch(
+    "gai._model.generate_content",
+    return_value=Mock(
+        text="```\nfoo\n```",
+    ),
+)
+def test_ask_gemini_with_fences(mock_generate_content: Mock) -> None:
+    """Test that `ask_gemini` handles a response with fences."""
+    response = main.ask_gemini("test prompt")
+    assert response == "foo"
+
+
+@patch(
+    "gai._model.generate_content",
+    return_value=Mock(
+        text="foo",
+    ),
+)
+def test_ask_gemini_no_fences(mock_generate_content: Mock) -> None:
+    """Test that `ask_gemini` handles a response with no fences."""
+    response = main.ask_gemini("test prompt")
+    assert response == "foo"
+
+
+@patch("gai.run")
+@patch(
+    "gai.pr_summary_from_diff", return_value='{"title": "Test PR", "body": "PR body"}'
+)
+@patch("gai.get_default_branch", return_value="main")
+@patch("gai._check_gh_installed", return_value=None)
+def test_main_submit_with_draft(
+    mock_check_gh: Mock,
+    mock_get_default_branch: Mock,
+    mock_pr_summary: Mock,
+    mock_run: Mock,
+) -> None:
+    """Test the main function with `submit --draft`."""
+    mock_run.return_value = "diff"
+    with patch("sys.argv", ["gai", "submit", "--yes", "--draft"]):
+        main.main()
+    mock_run.assert_any_call(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--title",
+            "Test PR",
+            "--body",
+            "PR body",
+            "--draft",
+        ]
+    )
+
+
+@patch("gai.run")
+@patch("gai.get_diff", return_value="diff")
+@patch("gai.stash_name_from_diff", return_value="stash message")
+def test_main_stash_with_message(
+    mock_stash_name: Mock, mock_get_diff: Mock, mock_run: Mock
+) -> None:
+    """Test the main function with `stash -m`."""
+    with patch("sys.argv", ["gai", "stash", "-m", "my custom message"]):
+        main.main()
+        mock_run.assert_called_with(["git", "stash", "push", "-m", "my custom message"])

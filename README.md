@@ -106,7 +106,7 @@ The first time `gai commit` is run, it will install pre-commit hooks if they hav
 
 ### `gai stash`
 
-Generates a stash message based on your unstaged changes.
+Generates a stash message based on your unstaged changes. Use the `-m` flag to provide your own message, or the `-y` flag to bypass the confirmation prompt.
 
 1.  Make changes to your tracked files.
 2.  Run the command:
@@ -142,7 +142,7 @@ Provides a code review on your staged changes.
 
 ### `gai submit`
 
-Creates a pull request with an AI-generated title and body. This command requires the `gh` command-line tool to be installed.
+Creates a pull request with an AI-generated title and body. This command requires the `gh` command-line tool to be installed. Use the `--draft` flag to create a draft pull request.
 
 1.  Push your changes to a remote branch.
 2.  Run the command:

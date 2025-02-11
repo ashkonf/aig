@@ -478,23 +478,25 @@ def _handle_git_passthrough():
 
     try:
         # Replace "git" with "gai" in the command's output
-        return subprocess.run(["git"] + sys.argv[1:], text=True, check=False)
+        result = subprocess.run(["git"] + sys.argv[1:], text=True, check=False)
+        sys.exit(result.returncode)
     except FileNotFoundError:
         sys.exit("❌ git is not installed or not in your PATH.")
 
 
 def main() -> None:
     """Main entry point for the CLI."""
-    if len(sys.argv) > 1 and sys.argv[1] in [
-        "-h",
-        "--help",
-        "-v",
-        "--version",
-    ]:
-        # Let argparse handle help and version requests
-        pass
-    elif len(sys.argv) == 1 or sys.argv[1] not in {c.value for c in Command}:
-        _handle_git_passthrough()
+
+    if len(sys.argv) > 1:
+        if sys.argv[1] not in {c.value for c in Command}:
+            # Let argparse handle help and version requests
+            if sys.argv[1] not in [
+                "-h",
+                "--help",
+                "-v",
+                "--version",
+            ]:
+                _handle_git_passthrough()
 
     parser = argparse.ArgumentParser(prog="gai", description="AI-enhanced git wrapper")
     subs = parser.add_subparsers(dest="command", required=True)

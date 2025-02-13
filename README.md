@@ -35,7 +35,6 @@
 -   **Seamless Integration**: Acts as a drop-in replacement for `git`. You can even alias `git` to `gai` for a fully integrated experience.
 -   **AI-Powered Commits**: Generate clear, conventional commit messages from your staged changes automatically.
 -   **Code Insights**: Get quick summaries of your commit history (`gai log`), understand the "why" behind code changes (`gai blame`), and even get a code review on your work (`gai review`).
--   **Streamlined PRs**: Create pull requests with AI-generated titles and descriptions (`gai submit`).
 -   **Extensible**: `gai` is built to be easily extensible with new AI-powered commands.
 
 ## ✨ Features
@@ -45,7 +44,6 @@
 -   📜 **`gai log`**: Summarizes the last 10 commits in natural language.
 -   🕵️ **`gai blame <file> <line>`**: Explains why a specific line of code was changed.
 -   👨‍💻 **`gai review`**: Provides a code review on your staged changes.
--   ✨ **`gai submit`**: Creates a pull request with an AI-generated title and description.
 -   🔧 **`gai config`**: Manages configuration settings, like branch prefixes.
 -   ✅ **`gai test`**: Runs pre-commit hooks on all files.
 -   👉 **Git Passthrough**: Use `gai` as a drop-in replacement for `git`. Any command not native to `gai` is passed directly to `git`.
@@ -140,16 +138,6 @@ Provides a code review on your staged changes.
     gai review
     ```
 
-### `gai submit`
-
-Creates a pull request with an AI-generated title and body. This command requires the `gh` command-line tool to be installed. Use the `--draft` flag to create a draft pull request.
-
-1.  Push your changes to a remote branch.
-2.  Run the command:
-    ```bash
-    gai submit
-    ```
-3.  The tool will suggest a title and body. Review them and type 'y' to accept and create the pull request. Use the `-y` flag to bypass the confirmation prompt.
 
 ### `gai config`
 

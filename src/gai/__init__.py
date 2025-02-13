@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
-import json
 import os
-import shutil
 import subprocess
 import sys
 from enum import Enum
@@ -12,6 +10,7 @@ from dotenv import load_dotenv
 
 import google.generativeai as genai
 from google.generativeai.types import HarmBlockThreshold, HarmCategory
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
@@ -67,7 +66,6 @@ class Command(str, Enum):
     CONFIG = "config"
     TEST = "test"
     STASH = "stash"
-    SUBMIT = "submit"
     REVIEW = "review"
 
 
@@ -221,18 +219,6 @@ def code_review_from_diff(diff: str) -> str:
         f"<diff>\n{diff}\n</diff>"
     )
     return ask_gemini(prompt, max_tokens=1000)
-
-
-def pr_summary_from_diff(diff: str) -> str:
-    """Return a PR title and body from a diff."""
-    prompt = (
-        "You are an expert developer. Based on the following diff, generate a "
-        "pull request title and a short summary body in JSON format. The JSON "
-        'should have two keys: "title" and "body". The title should start with '
-        "a relevant, positive emoji.\n\n"
-        f"<diff>\n{diff}\n</diff>"
-    )
-    return ask_gemini(prompt, max_tokens=250)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -399,70 +385,6 @@ def _handle_config(args: argparse.Namespace) -> None:
             print("✅ Branch prefix unset.")
 
 
-def _check_gh_installed():
-    """Check if gh is installed."""
-    if not shutil.which("gh"):
-        sys.exit(
-            "❌ The 'gh' command-line tool is not installed. "
-            "Please install it to use the 'submit' command. "
-            "See: https://cli.github.com/"
-        )
-
-
-def _handle_submit(args: argparse.Namespace, extra_args: list[str]) -> None:
-    """Handle the 'submit' command."""
-    _check_gh_installed()
-
-    # Get the diff from the commits that are not on the main branch
-    try:
-        remote = run(["git", "remote"]).strip().split("\n")[0]
-        base = args.base or get_default_branch()
-        diff = run(["git", "diff", f"$(git merge-base HEAD {remote}/{base})..HEAD"])
-    except subprocess.CalledProcessError as e:
-        sys.exit(f"❌ Could not get diff from main branch: {e}")
-
-    if not diff.strip():
-        sys.exit("⚠️ No changes to submit.")
-
-    # Generate the PR title and body
-    summary_json = pr_summary_from_diff(diff)
-    try:
-        # The output from Gemini might be enclosed in ```json ... ```, so we strip that.
-        if summary_json.startswith("```json"):
-            summary_json = summary_json[7:-4]
-        summary = json.loads(summary_json)
-        title = summary["title"]
-        body = summary["body"]
-    except (json.JSONDecodeError, KeyError) as e:
-        sys.exit(f"❌ Could not parse PR summary from Gemini: {e}\n{summary_json}")
-
-    print("\nSuggested PR title:\n")
-    print(title)
-    print("\nSuggested PR body:\n")
-    print(body)
-
-    should_submit = args.yes or input(
-        "\nUse this title and body? [Y/n] "
-    ).strip().lower() in (
-        "",
-        "y",
-        "yes",
-    )
-
-    if should_submit:
-        try:
-            cmd = ["gh", "pr", "create", "--title", title, "--body", body]
-            if args.base:
-                cmd.extend(["--base", args.base])
-            if args.draft:
-                cmd.append("--draft")
-            cmd.extend(extra_args)
-            run(cmd)
-            print("✅ Pull request submitted successfully.")
-        except subprocess.CalledProcessError as e:
-            sys.exit(f"❌ Failed to create pull request: {e}")
-
-
 def _handle_git_passthrough():
     if sys.argv[1] in ("checkout", "branch"):
         # Branch prefix rewriting for `gai checkout -b` or `gai branch`
@@ -502,7 +424,7 @@ def main() -> None:
     subs = parser.add_subparsers(dest="command", required=True)
 
     commit_p = subs.add_parser(
-        Command.COMMIT, help="Generate a commit message from staged changes"
+        Command.COMMIT.value, help="Generate a commit message from staged changes"
     )
     commit_p.add_argument(
         "-y", "--yes", action="store_true", help="Commit without confirmation"
@@ -513,7 +435,7 @@ def main() -> None:
     commit_p.add_argument("--date", help="Override the date of the commit")
 
     stash_p = subs.add_parser(
-        Command.STASH, help="Generate a stash message from staged changes"
+        Command.STASH.value, help="Generate a stash message from staged changes"
     )
     stash_p.add_argument(
         "-y", "--yes", action="store_true", help="Stash without confirmation"
@@ -521,30 +443,17 @@ def main() -> None:
     stash_p.add_argument(
         "-m", "--message", help="Provide a stash message instead of generating one"
     )
-    subs.add_parser(Command.LOG, help="Summarize the last 10 commits")
-    subs.add_parser(Command.TEST, help="Run pre-commit hooks on all files")
-    subs.add_parser(Command.REVIEW, help="Request a code review on staged changes")
+    subs.add_parser(Command.LOG.value, help="Summarize the last 10 commits")
+    subs.add_parser(Command.TEST.value, help="Run pre-commit hooks on all files")
+    subs.add_parser(
+        Command.REVIEW.value, help="Request a code review on staged changes"
+    )
 
-    blame_p = subs.add_parser(Command.BLAME, help="Explain a line change")
+    blame_p = subs.add_parser(Command.BLAME.value, help="Explain a line change")
     blame_p.add_argument("file", help="Path to the file")
     blame_p.add_argument("line", help="Line number")
 
-    submit_p = subs.add_parser(
-        Command.SUBMIT,
-        help="Create a pull request with an AI-generated title and description",
-    )
-    submit_p.add_argument(
-        "-y", "--yes", action="store_true", help="Submit without confirmation"
-    )
-    submit_p.add_argument(
-        "--base",
-        help="Base branch for the pull request",
-    )
-    submit_p.add_argument(
-        "--draft", action="store_true", help="Create a draft pull request"
-    )
-
-    config_p = subs.add_parser(Command.CONFIG, help="Set configuration for gai")
+    config_p = subs.add_parser(Command.CONFIG.value, help="Set configuration for gai")
     config_p.add_argument(
         "--branch-prefix",
         help="Set a prefix for new branches created with `gai checkout -b`",
@@ -560,7 +469,6 @@ def main() -> None:
         Command.CONFIG: _handle_config,
         Command.TEST: _handle_test,
         Command.REVIEW: _handle_review,
-        Command.SUBMIT: _handle_submit,
     }
     if args.command in (
         Command.COMMIT,
@@ -568,7 +476,6 @@ def main() -> None:
         Command.BLAME,
         Command.STASH,
         Command.REVIEW,
-        Command.SUBMIT,
     ):
         handlers[args.command](args, extra_args)
     elif args.command in (Command.TEST,):

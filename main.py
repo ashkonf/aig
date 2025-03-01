@@ -13,11 +13,43 @@ from dotenv import load_dotenv
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
 
-load_dotenv()
+def get_or_prompt_for_api_key() -> str:
+    """
+    Retrieves the API key from environment variables or prompts the user for it.
+    If a new key is provided, it's saved to the .env file.
+    """
+    load_dotenv()
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if api_key:
+        return api_key
 
-API_KEY: str | None = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-if not API_KEY:
-    sys.exit("❌ Set GEMINI_API_KEY or GOOGLE_API_KEY in your environment.")
+    if not sys.stdout.isatty():
+        sys.exit(
+            "🔑 API key not found. Please set GEMINI_API_KEY or GOOGLE_API_KEY in your environment."
+        )
+
+    print("🔑 Gemini API key not found.")
+    api_key = input("Please enter your API key: ").strip()
+
+    if not api_key:
+        sys.exit("❌ Gemini API key is required to use gai.")
+
+    # Save the API key to a .env file for future use.
+    with open(".env", "a") as f:
+        # Add a newline if file is not empty to ensure key is on a new line
+        if f.tell() != 0:
+            f.write("\n")
+        f.write(f"GEMINI_API_KEY={api_key}\n")
+    
+    print("✅ API key saved to .env file for future use.")
+    
+    # Set the environment variable for the current session
+    os.environ["GEMINI_API_KEY"] = api_key
+    
+    return api_key
+
+
+API_KEY: str | None = get_or_prompt_for_api_key()
 
 genai.configure(api_key=API_KEY)
 MODEL_NAME: str = os.getenv("MODEL_NAME") or "gemini-2.5-pro-latest"  # use a current, valid model
@@ -28,6 +60,7 @@ class Command(str, Enum):
     COMMIT = "commit"
     LOG = "log"
     BLAME = "blame"
+    CONFIG = "config"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -143,7 +176,7 @@ def _install_pre_commit_hooks_if_needed():
         print("▶ pre-commit hooks not found. Installing...")
         try:
             subprocess.run(
-                ["uv", "run", "pre-commit", "install"],
+                [sys.executable, "-m", "pre_commit", "install"],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -213,6 +246,16 @@ def _handle_blame(args: argparse.Namespace, extra_args: list[str]) -> None:
     print(explanation)
 
 
+def _handle_config(args: argparse.Namespace) -> None:
+    """Handle the 'config' command."""
+    if args.branch_prefix is not None:
+        if args.branch_prefix:
+            run(["git", "config", "gai.branch-prefix", args.branch_prefix])
+            print(f"✅ Branch prefix set to: {args.branch_prefix}")
+        else:
+            run(["git", "config", "--unset", "gai.branch-prefix"])
+            print("✅ Branch prefix unset.")
+
 def _handle_git_passthrough():
     if sys.argv[1] in ("checkout", "branch"):
         # Branch prefix rewriting for `gai checkout -b` or `gai branch`
@@ -272,14 +315,25 @@ def main() -> None:
     blame_p.add_argument("file", help="Path to the file")
     blame_p.add_argument("line", help="Line number")
 
-    args, extra_args = parser.parse_known_args()
+    config_p = subs.add_parser(Command.CONFIG, help="Set configuration for gai")
+    config_p.add_argument(
+        "--branch-prefix",
+        help="Set a prefix for new branches created with `gai checkout -b`",
+    )
 
-    handlers: dict[Command, Callable[[argparse.Namespace, list[str]], None]] = {
+ 
+    args, extra_args = parser.parse_known_args()
+ 
+    handlers: dict[Command, Callable[..., None]] = {
         Command.COMMIT: _handle_commit,
         Command.LOG: _handle_log,
         Command.BLAME: _handle_blame,
+        Command.CONFIG: _handle_config,
     }
-    handlers[args.command](args, extra_args)
+    if args.command in (Command.COMMIT, Command.LOG, Command.BLAME):
+        handlers[args.command](args, extra_args)
+    else:
+        handlers[args.command](args)
 
 
 if __name__ == "__main__":

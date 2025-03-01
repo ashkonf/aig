@@ -1,13 +1,25 @@
-# gai: AI-assisted Git utility
+<div align="center">
+
+# GitAI
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Pytest](https://img.shields.io/badge/pytest-✓-brightgreen)](https://docs.pytest.org)
+[![Pyright](https://img.shields.io/badge/pyright-✓-green)](https://github.com/microsoft/pyright)
+[![Ruff](https://img.shields.io/badge/ruff-✓-blue?logo=ruff)](https://github.com/astral-sh/ruff)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/ashkonf/gai/ci.yml?branch=main)](https://github.com/ashkonf/gai/actions/workflows/ci.yml?query=branch%3Amain)
+[![codecov](https://codecov.io/github/ashkonf/gai/graph/badge.svg?token=7Y596J8IYZ)](https://codecov.io/github/ashkonf/)
 
-`gai` is a command-line tool that uses Google's Gemini 2.5 Pro to provide AI assistance for common Git operations. It helps you write better commit messages, understand your commit history, and find out why code was changed.
+`gai` is a command-line tool that uses Google's Gemini 2.5 Pro to provide AI assistance for common Git operations. It helps you 
+write better commit messages, understand your commit history, and find out why code was changed.
+
+</div>
 
 ## Table of Contents
 
 - [Features](#features)
 - [Installation](#installation)
+- [Development](#development)
 - [Configuration](#configuration)
   - [Branch Prefix](#branch-prefix)
 - [Usage](#usage)
@@ -50,14 +62,13 @@
 
 ### Branch Prefix
 
-You can configure a prefix for all new branches created with `gai checkout -b` or `gai branch`. This is useful for teams that follow a branch naming convention (e.g., `feature/`, `bugfix/`).
+You can configure a prefix for all new branches created with `gai checkout -b` or `gai branch`. This is useful for teams that follow a branch naming convention (e.g. `username/`).
 
 ```bash
 git config --global gai.branch-prefix "feature/"
 ```
 
 Now, when you run `gai checkout -b new-feature`, the branch will be named `feature/new-feature`.
-
 
 ## Usage
 
@@ -71,6 +82,8 @@ Generates a commit message based on your staged changes.
     gai commit
     ```
 3.  The tool will suggest a commit message. Review it and type 'y' to accept and commit.
+
+The first time gai commit is run, it will install pre-commit hooks if they have not been installed already.
 
 ### `gai log`
 

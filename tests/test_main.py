@@ -1,6 +1,8 @@
 from unittest.mock import patch, Mock
 import pytest
 import main
+import sys
+import argparse
 
 # ------------------------------------------------------------------------------
 # Mocks and Fixtures
@@ -95,7 +97,7 @@ def test_install_pre_commit_hooks_if_needed(mock_run, mock_exists):
     mock_exists.return_value = False
     main._install_pre_commit_hooks_if_needed()
     mock_run.assert_called_once_with(
-        ["uv", "run", "pre-commit", "install"],
+        [sys.executable, "-m", "pre_commit", "install"],
         check=True,
         capture_output=True,
         text=True,
@@ -110,15 +112,21 @@ def test_install_pre_commit_hooks_if_needed_already_installed(mock_run, mock_exi
     main._install_pre_commit_hooks_if_needed()
     mock_run.assert_not_called()
 
+
 # ------------------------------------------------------------------------------
 # Tests for Main CLI Logic
 # ------------------------------------------------------------------------------
 
 
-@patch("main.get_diff", return_value="some diff")
+@patch("subprocess.run")
 @patch("main.commit_message_from_diff", return_value="feat: Test commit")
+@patch("main.get_diff", return_value="some diff")
+@patch("main._install_pre_commit_hooks_if_needed", return_value=None)
 def test_main_commit_yes(
-    mock_commit_message: Mock, mock_get_diff: Mock, mock_subprocess_run: Mock
+    mock_install_hooks: Mock,
+    mock_get_diff: Mock,
+    mock_commit_message: Mock,
+    mock_subprocess_run: Mock,
 ) -> None:
     """Test the main function with `commit --yes`."""
     with patch("sys.argv", ["gai", "commit", "--yes"]):
@@ -135,7 +143,9 @@ def test_main_commit_yes(
 
 @patch("main.get_diff", return_value="some diff")
 @patch("main.commit_message_from_diff", return_value="feat: Test commit")
+@patch("main._install_pre_commit_hooks_if_needed", return_value=None)
 def test_main_commit_interactive_yes(
+    mock_install_hooks: Mock,
     mock_commit_message: Mock,
     mock_get_diff: Mock,
     mock_input: Mock,
@@ -156,7 +166,9 @@ def test_main_commit_interactive_yes(
 
 @patch("main.get_diff", return_value="some diff")
 @patch("main.commit_message_from_diff", return_value="feat: Test commit")
+@patch("main._install_pre_commit_hooks_if_needed")
 def test_main_commit_interactive_no(
+    mock_install_hooks: Mock,
     mock_commit_message: Mock,
     mock_get_diff: Mock,
     mock_input: Mock,
@@ -191,7 +203,10 @@ def test_main_blame(mock_explain: Mock, mock_get_blame: Mock) -> None:
 
 
 @patch("main.get_diff", return_value="")
-def test_main_commit_no_changes(mock_get_diff: Mock, mock_subprocess_run: Mock) -> None:
+@patch("main._install_pre_commit_hooks_if_needed")
+def test_main_commit_no_changes(
+    mock_install_hooks: Mock, mock_get_diff: Mock, mock_subprocess_run: Mock
+) -> None:
     """Test the main function with `commit` and no staged changes."""
     with patch("sys.argv", ["gai", "commit"]):
         main.main()
@@ -265,3 +280,38 @@ def test_git_passthrough_branch_rewrite_short(
         text=True,
         check=False,
     )
+
+@patch("main.run")
+def test_main_config_set_prefix(mock_run: Mock) -> None:
+    """Test the main function with `config --branch-prefix`."""
+    with patch("sys.argv", ["gai", "config", "--branch-prefix", "feature"]):
+        with patch("argparse.ArgumentParser.parse_known_args") as mock_parse:
+            mock_parse.return_value = (
+                argparse.Namespace(
+                    command="config",
+                    branch_prefix="feature",
+                    google_api_key=None,
+                    gemini_api_key=None,
+                ),
+                [],
+            )
+            main.main()
+    mock_run.assert_called_with(["git", "config", "gai.branch-prefix", "feature"])
+
+
+@patch("main.run")
+def test_main_config_unset_prefix(mock_run: Mock) -> None:
+    """Test the main function with `config --branch-prefix ''`."""
+    with patch("sys.argv", ["gai", "config", "--branch-prefix", ""]):
+        with patch("argparse.ArgumentParser.parse_known_args") as mock_parse:
+            mock_parse.return_value = (
+                argparse.Namespace(
+                    command="config",
+                    branch_prefix="",
+                    google_api_key=None,
+                    gemini_api_key=None,
+                ),
+                [],
+            )
+            main.main()
+    mock_run.assert_called_with(["git", "config", "--unset", "gai.branch-prefix"])

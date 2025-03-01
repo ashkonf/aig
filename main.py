@@ -51,12 +51,11 @@ def get_or_prompt_for_api_key() -> str:
 
 
 API_KEY: str | None = get_or_prompt_for_api_key()
-
-genai.configure(api_key=API_KEY)
+genai.configure(api_key=API_KEY) # type: ignore
 MODEL_NAME: str = (
     os.getenv("MODEL_NAME") or "gemini-2.5-pro-latest"
-)  # use a current, valid model
-_model: genai.GenerativeModel = genai.GenerativeModel(MODEL_NAME)
+)
+_model: genai.GenerativeModel = genai.GenerativeModel(MODEL_NAME) # type: ignore
 
 
 class Command(str, Enum):
@@ -186,7 +185,7 @@ def _install_pre_commit_hooks_if_needed():
             )
             print("✅ pre-commit hooks installed successfully.")
         except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            error_message = e.stderr if hasattr(e, "stderr") else str(e)
+            error_message = str(e)
             print(
                 f"⚠️ Could not install pre-commit hooks: {error_message}",
                 file=sys.stderr,

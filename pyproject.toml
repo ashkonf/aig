@@ -12,6 +12,8 @@ dependencies = [
     "python-dotenv",
     "pytest",
     "pre-commit>=4.2.0",
+    "ruff>=0.12.7",
+    "pyright>=1.1.403",
 ]
 
 [project.scripts]

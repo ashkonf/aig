@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def get_or_prompt_for_api_key() -> str:
     """
     Retrieves the API key from environment variables or prompts the user for it.
@@ -40,19 +41,21 @@ def get_or_prompt_for_api_key() -> str:
         if f.tell() != 0:
             f.write("\n")
         f.write(f"GEMINI_API_KEY={api_key}\n")
-    
+
     print("✅ API key saved to .env file for future use.")
-    
+
     # Set the environment variable for the current session
     os.environ["GEMINI_API_KEY"] = api_key
-    
+
     return api_key
 
 
 API_KEY: str | None = get_or_prompt_for_api_key()
 
 genai.configure(api_key=API_KEY)
-MODEL_NAME: str = os.getenv("MODEL_NAME") or "gemini-2.5-pro-latest"  # use a current, valid model
+MODEL_NAME: str = (
+    os.getenv("MODEL_NAME") or "gemini-2.5-pro-latest"
+)  # use a current, valid model
 _model: genai.GenerativeModel = genai.GenerativeModel(MODEL_NAME)
 
 
@@ -184,7 +187,10 @@ def _install_pre_commit_hooks_if_needed():
             print("✅ pre-commit hooks installed successfully.")
         except (FileNotFoundError, subprocess.CalledProcessError) as e:
             error_message = e.stderr if hasattr(e, "stderr") else str(e)
-            print(f"⚠️ Could not install pre-commit hooks: {error_message}", file=sys.stderr)
+            print(
+                f"⚠️ Could not install pre-commit hooks: {error_message}",
+                file=sys.stderr,
+            )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -256,6 +262,7 @@ def _handle_config(args: argparse.Namespace) -> None:
             run(["git", "config", "--unset", "gai.branch-prefix"])
             print("✅ Branch prefix unset.")
 
+
 def _handle_git_passthrough():
     if sys.argv[1] in ("checkout", "branch"):
         # Branch prefix rewriting for `gai checkout -b` or `gai branch`
@@ -295,9 +302,7 @@ def main() -> None:
         _handle_git_passthrough()
         return
 
-    parser = argparse.ArgumentParser(
-        prog="gai", description="AI‑enhanced git wrapper"
-    )
+    parser = argparse.ArgumentParser(prog="gai", description="AI‑enhanced git wrapper")
     subs = parser.add_subparsers(dest="command", required=True)
 
     commit_p = subs.add_parser(
@@ -321,9 +326,8 @@ def main() -> None:
         help="Set a prefix for new branches created with `gai checkout -b`",
     )
 
- 
     args, extra_args = parser.parse_known_args()
- 
+
     handlers: dict[Command, Callable[..., None]] = {
         Command.COMMIT: _handle_commit,
         Command.LOG: _handle_log,

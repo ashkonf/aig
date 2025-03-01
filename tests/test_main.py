@@ -281,6 +281,7 @@ def test_git_passthrough_branch_rewrite_short(
         check=False,
     )
 
+
 @patch("main.run")
 def test_main_config_set_prefix(mock_run: Mock) -> None:
     """Test the main function with `config --branch-prefix`."""

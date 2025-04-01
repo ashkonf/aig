@@ -10,8 +10,8 @@
 [![Build Status](https://img.shields.io/github/actions/workflow/status/ashkonf/gai/ci.yml?branch=main)](https://github.com/ashkonf/gai/actions/workflows/ci.yml?query=branch%3Amain)
 [![codecov](https://codecov.io/github/ashkonf/gai/graph/badge.svg?token=7Y596J8IYZ)](https://codecov.io/github/ashkonf/)
 
-`gai` is a command-line tool that uses Google's Gemini 2.5 Pro to provide AI assistance for common Git operations. It helps you 
-write better commit messages, understand your commit history, and find out why code was changed.
+`gai` is a command-line tool that uses Google's Gemini 2.5 Pro to provide AI assistance for common Git operations. It helps you
+write better commit messages, understand your commit history, and find out why code was changed. `gai` also acts as a transparent wrapper around `git`, so you can use it for all your daily git commands.
 
 </div>
 
@@ -19,26 +19,34 @@ write better commit messages, understand your commit history, and find out why c
 
 - [Features](#features)
 - [Installation](#installation)
-- [Development](#development)
 - [Configuration](#configuration)
+  - [API Key](#api-key)
   - [Branch Prefix](#branch-prefix)
 - [Usage](#usage)
   - [`gai commit`](#gai-commit)
   - [`gai log`](#gai-log)
   - [`gai blame <file> <line>`](#gai-blame-file-line)
+  - [`gai config`](#gai-config)
+  - [`gai test`](#gai-test)
+  - [Git Passthrough](#git-passthrough)
+- [Development](#development)
+- [License](#license)
 
 ## Features
 
 - **`gai commit`**: Generates a concise and conventional commit message from your staged changes.
 - **`gai log`**: Summarizes the last 10 commits in natural language.
 - **`gai blame <file> <line>`**: Explains why a specific line of code was changed.
+- **`gai config`**: Manages configuration settings, like branch prefixes.
+- **`gai test`**: Runs pre-commit hooks on all files.
+- **Git Passthrough**: Use `gai` as a drop-in replacement for `git`. Any command not native to `gai` is passed directly to `git`.
 
 ## Installation
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/gai-labs/gai-oss.git
-    cd gai-oss
+    git clone https://github.com/ashkonf/gai.git
+    cd gai
     ```
 
 2.  Install the dependencies:
@@ -47,6 +55,8 @@ write better commit messages, understand your commit history, and find out why c
     ```
 
 ## Configuration
+
+### API Key
 
 `gai` requires a Google Gemini API key.
 
@@ -59,16 +69,11 @@ write better commit messages, understand your commit history, and find out why c
     ```
     GEMINI_API_KEY="your-api-key-here"
     ```
+4. If the API key is not found, `gai` will prompt you for it and save it to a `.env` file for future use.
 
 ### Branch Prefix
 
-You can configure a prefix for all new branches created with `gai checkout -b` or `gai branch`. This is useful for teams that follow a branch naming convention (e.g. `username/`).
-
-```bash
-git config --global gai.branch-prefix "feature/"
-```
-
-Now, when you run `gai checkout -b new-feature`, the branch will be named `feature/new-feature`.
+You can configure a prefix for all new branches created with `gai checkout -b` or `gai branch`. This is useful for teams that follow a branch naming convention (e.g. `username/`). See the [`gai config`](#gai-config) section for more details.
 
 ## Usage
 
@@ -81,9 +86,9 @@ Generates a commit message based on your staged changes.
     ```bash
     gai commit
     ```
-3.  The tool will suggest a commit message. Review it and type 'y' to accept and commit.
+3.  The tool will suggest a commit message. Review it and type 'y' to accept and commit. Use the `-y` flag to bypass the confirmation prompt.
 
-The first time gai commit is run, it will install pre-commit hooks if they have not been installed already.
+The first time `gai commit` is run, it will install pre-commit hooks if they have not been installed already.
 
 ### `gai log`
 
@@ -101,11 +106,57 @@ Explains *why* a specific line of code was last modified by analyzing the `git b
 gai blame main.py 115
 ```
 
+### `gai config`
+
+Sets configuration options for `gai`.
+
+To set a branch prefix:
+```bash
+gai config --branch-prefix "feature/"
+```
+Now, when you run `gai checkout -b new-feature` or `gai branch new-feature`, the branch will be named `feature/new-feature`.
+
+To unset the branch prefix:
+```bash
+gai config --branch-prefix ""
+```
+
+### `gai test`
+
+Runs all configured pre-commit hooks on your entire repository.
+
+```bash
+gai test
+```
+
+### Git Passthrough
+
+`gai` can be used as a drop-in replacement for `git`. Any command that is not a special `gai` command (like `commit`, `log`, etc.) will be passed through to `git`.
+
+For example, `gai status` is equivalent to `git status`.
+
+## Development
+
+To set up the development environment, follow these steps:
+
+1. Clone the repository and navigate into the directory.
+2. Install the project in editable mode with development dependencies:
+   ```bash
+   pip install -e .[dev]
+   ```
+3. The project uses the following development tools:
+    - `pytest` for running tests.
+    - `pyright` for static type checking.
+    - `ruff` for linting and formatting.
+    - `pre-commit` to enforce standards before each commit.
+
+To run the test suite, you can either use `pytest` or the built-in `gai` command:
+```bash
+pytest
+# or
+gai test
+```
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request.
-

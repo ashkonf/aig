@@ -51,11 +51,9 @@ def get_or_prompt_for_api_key() -> str:
 
 
 API_KEY: str | None = get_or_prompt_for_api_key()
-genai.configure(api_key=API_KEY) # type: ignore
-MODEL_NAME: str = (
-    os.getenv("MODEL_NAME") or "gemini-2.5-pro-latest"
-)
-_model: genai.GenerativeModel = genai.GenerativeModel(MODEL_NAME) # type: ignore
+genai.configure(api_key=API_KEY)  # type: ignore
+MODEL_NAME: str = os.getenv("MODEL_NAME") or "gemini-2.5-pro-latest"
+_model: genai.GenerativeModel = genai.GenerativeModel(MODEL_NAME)  # type: ignore
 
 
 class Command(str, Enum):
@@ -63,6 +61,7 @@ class Command(str, Enum):
     LOG = "log"
     BLAME = "blame"
     CONFIG = "config"
+    TEST = "test"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -202,6 +201,20 @@ def _replace_git_with_gai(text: str) -> str:
     return text.replace("git", "gai").replace("Git", "gai")
 
 
+def _handle_test() -> None:
+    """Handle the 'test' command."""
+    _install_pre_commit_hooks_if_needed()
+    print("▶ Running pre-commit hooks...")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pre_commit", "run", "--all-files"],
+            check=True,
+        )
+        print("✅ Pre-commit hooks passed.")
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        sys.exit(f"❌ Pre-commit hooks failed with error: {e}")
+
+
 def _handle_commit(args: argparse.Namespace, extra_args: list[str]) -> None:
     """Handle the 'commit' command."""
     _install_pre_commit_hooks_if_needed()
@@ -314,6 +327,7 @@ def main() -> None:
         "-m", "--message", help="Provide a commit message instead of generating one"
     )
     subs.add_parser(Command.LOG, help="Summarize the last 10 commits")
+    subs.add_parser(Command.TEST, help="Run pre-commit hooks on all files")
 
     blame_p = subs.add_parser(Command.BLAME, help="Explain a line change")
     blame_p.add_argument("file", help="Path to the file")
@@ -332,9 +346,12 @@ def main() -> None:
         Command.LOG: _handle_log,
         Command.BLAME: _handle_blame,
         Command.CONFIG: _handle_config,
+        Command.TEST: _handle_test,
     }
     if args.command in (Command.COMMIT, Command.LOG, Command.BLAME):
         handlers[args.command](args, extra_args)
+    elif args.command in (Command.TEST,):
+        handlers[args.command]()
     else:
         handlers[args.command](args)
 

@@ -316,3 +316,16 @@ def test_main_config_unset_prefix(mock_run: Mock) -> None:
             )
             main.main()
     mock_run.assert_called_with(["git", "config", "--unset", "gai.branch-prefix"])
+
+
+@patch("main._install_pre_commit_hooks_if_needed")
+@patch("subprocess.run")
+def test_main_test(mock_subprocess_run: Mock, mock_install_hooks: Mock) -> None:
+    """Test the main function with `test`."""
+    with patch("sys.argv", ["gai", "test"]):
+        main.main()
+        mock_install_hooks.assert_called_once()
+        mock_subprocess_run.assert_called_with(
+            [sys.executable, "-m", "pre_commit", "run", "--all-files"],
+            check=True,
+        )

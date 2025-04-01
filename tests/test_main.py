@@ -1,8 +1,16 @@
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, mock_open
 import pytest
-import main
+import gai as main
 import sys
-import argparse
+import subprocess
+
+import importlib
+
+
+def _reload_module():
+    """Reload the main module to test different configurations."""
+    importlib.reload(main)
+
 
 # ------------------------------------------------------------------------------
 # Mocks and Fixtures
@@ -12,14 +20,14 @@ import argparse
 @pytest.fixture
 def mock_run():
     """Fixture for mocking the `run` function."""
-    with patch("main.run") as mock:
+    with patch("gai.run") as mock:
         yield mock
 
 
 @pytest.fixture
 def mock_ask_gemini():
     """Fixture for mocking the `ask_gemini` function."""
-    with patch("main.ask_gemini") as mock:
+    with patch("gai.ask_gemini") as mock:
         yield mock
 
 
@@ -66,6 +74,79 @@ def test_get_blame(mock_run: Mock) -> None:
     mock_run.assert_called_with(["git", "blame", "-L", "1,1", "file.txt"])
 
 
+@patch(
+    "subprocess.check_output",
+    side_effect=FileNotFoundError("Command not found"),
+)
+def test_run_file_not_found(mock_check_output: Mock) -> None:
+    """Test that the run function exits if the command is not found."""
+    with pytest.raises(SystemExit) as e:
+        main.run(["some-command"])
+    assert "Command not found" in str(e.value)
+
+
+@patch("gai.run")
+def test_get_diff_with_extra_args(mock_run: Mock) -> None:
+    """Test the `get_diff` function with extra arguments."""
+    main.get_diff(["--", "file.txt"])
+    mock_run.assert_called_with(["git", "diff", "--cached", "--", "file.txt"])
+
+
+def test_get_log_with_extra_args(mock_run: Mock) -> None:
+    """Test the `get_log` function with extra arguments."""
+    main.get_log(["--author", "test"])
+    mock_run.assert_called_with(
+        ["git", "log", "-n", "10", "--oneline", "--author", "test"]
+    )
+
+
+def test_get_blame_with_extra_args(mock_run: Mock) -> None:
+    """Test the `get_blame` function with extra arguments."""
+    main.get_blame("file.txt", 1, ["-w"])
+    mock_run.assert_called_with(["git", "blame", "-L", "1,1", "file.txt", "-w"])
+
+
+@patch("gai.run", side_effect=subprocess.CalledProcessError(1, "cmd"))
+def test_get_branch_prefix_error(mock_run: Mock) -> None:
+    """Test that `get_branch_prefix` returns an empty string on error."""
+    prefix = main.get_branch_prefix()
+    assert prefix == ""
+
+
+@patch("gai.run", side_effect=subprocess.CalledProcessError(1, "cmd"))
+def test_get_default_branch_error(mock_run: Mock) -> None:
+    """Test that `get_default_branch` returns 'main' on error."""
+    branch = main.get_default_branch()
+    assert branch == "main"
+
+
+@patch(
+    "subprocess.check_output",
+    side_effect=subprocess.CalledProcessError(1, "cmd", "output"),
+)
+def test_run_called_process_error(mock_check_output: Mock) -> None:
+    """Test that the run function exits if the command fails."""
+    with pytest.raises(SystemExit) as e:
+        main.run(["some-command"])
+    assert "Command failed" in str(e.value)
+
+
+@patch("gai._model.generate_content", side_effect=Exception("API key not valid"))
+def test_ask_gemini_invalid_api_key(mock_generate_content: Mock) -> None:
+    """Test that `ask_gemini` handles an invalid API key."""
+    with pytest.raises(SystemExit) as e:
+        main.ask_gemini("test prompt")
+    assert "API key is not valid" in str(e.value)
+
+
+@patch("gai._model.generate_content", side_effect=Exception("Some other error"))
+def test_ask_gemini_other_error(mock_generate_content: Mock) -> None:
+    """Test that `ask_gemini` handles other API errors."""
+    with pytest.raises(SystemExit) as e:
+        main.ask_gemini("test prompt")
+    assert "Gemini API error" in str(e.value)
+
+
 def test_commit_message_from_diff(mock_ask_gemini: Mock) -> None:
     """Test the `commit_message_from_diff` function."""
     mock_ask_gemini.return_value = "feat: Implement new feature"
@@ -98,6 +179,22 @@ def test_code_review_from_diff(mock_ask_gemini: Mock) -> None:
     mock_ask_gemini.assert_called_once()
 
 
+def test_stash_name_from_diff(mock_ask_gemini: Mock) -> None:
+    """Test the `stash_name_from_diff` function."""
+    mock_ask_gemini.return_value = "WIP: Stash"
+    msg = main.stash_name_from_diff("some diff")
+    assert "WIP: Stash" in msg
+    mock_ask_gemini.assert_called_once()
+
+
+def test_pr_summary_from_diff(mock_ask_gemini: Mock) -> None:
+    """Test the `pr_summary_from_diff` function."""
+    mock_ask_gemini.return_value = '{"title": "Test PR", "body": "PR body"}'
+    summary = main.pr_summary_from_diff("some diff")
+    assert "Test PR" in summary
+    mock_ask_gemini.assert_called_once()
+
+
 @patch("os.path.exists")
 @patch("subprocess.run")
 def test_install_pre_commit_hooks_if_needed(mock_run, mock_exists):
@@ -121,15 +218,28 @@ def test_install_pre_commit_hooks_if_needed_already_installed(mock_run, mock_exi
     mock_run.assert_not_called()
 
 
+@patch("os.path.exists", return_value=False)
+@patch(
+    "subprocess.run",
+    side_effect=subprocess.CalledProcessError(1, "cmd"),
+)
+def test_install_pre_commit_hooks_if_needed_error(
+    mock_run: Mock, mock_exists: Mock
+) -> None:
+    """Test that pre-commit hook installation errors are handled."""
+    main._install_pre_commit_hooks_if_needed()
+    mock_run.assert_called_once()
+
+
 # ------------------------------------------------------------------------------
 # Tests for Main CLI Logic
 # ------------------------------------------------------------------------------
 
 
 @patch("subprocess.run")
-@patch("main.commit_message_from_diff", return_value="feat: Test commit")
-@patch("main.get_diff", return_value="some diff")
-@patch("main._install_pre_commit_hooks_if_needed", return_value=None)
+@patch("gai.commit_message_from_diff", return_value="feat: Test commit")
+@patch("gai.get_diff", return_value="some diff")
+@patch("gai._install_pre_commit_hooks_if_needed", return_value=None)
 @patch("os.environ.copy", return_value={})
 def test_main_commit_yes(
     mock_env_copy: Mock,
@@ -154,9 +264,9 @@ def test_main_commit_yes(
 
 
 @patch("subprocess.run")
-@patch("main.commit_message_from_diff", return_value="feat: Test commit")
-@patch("main.get_diff", return_value="some diff")
-@patch("main._install_pre_commit_hooks_if_needed", return_value=None)
+@patch("gai.commit_message_from_diff", return_value="feat: Test commit")
+@patch("gai.get_diff", return_value="some diff")
+@patch("gai._install_pre_commit_hooks_if_needed", return_value=None)
 @patch("os.environ.copy", return_value={})
 def test_main_commit_with_date(
     mock_env_copy: Mock,
@@ -182,8 +292,8 @@ def test_main_commit_with_date(
 
 
 @patch("subprocess.run")
-@patch("main.get_diff", return_value="some diff")
-@patch("main._install_pre_commit_hooks_if_needed", return_value=None)
+@patch("gai.get_diff", return_value="some diff")
+@patch("gai._install_pre_commit_hooks_if_needed", return_value=None)
 @patch("os.environ.copy", return_value={})
 def test_main_commit_with_message(
     mock_env_copy: Mock,
@@ -205,20 +315,21 @@ def test_main_commit_with_message(
         )
 
 
-@patch("main.get_diff", return_value="some diff")
-@patch("main.commit_message_from_diff", return_value="feat: Test commit")
-@patch("main._install_pre_commit_hooks_if_needed", return_value=None)
+@patch("subprocess.run")
+@patch("builtins.input", return_value="y")
 @patch("os.environ.copy", return_value={})
+@patch("gai._install_pre_commit_hooks_if_needed", return_value=None)
+@patch("gai.commit_message_from_diff", return_value="feat: Test commit")
+@patch("gai.get_diff", return_value="some diff")
 def test_main_commit_interactive_yes(
-    mock_env_copy: Mock,
-    mock_install_hooks: Mock,
-    mock_commit_message: Mock,
     mock_get_diff: Mock,
+    mock_commit_message: Mock,
+    mock_install_hooks: Mock,
+    mock_env_copy: Mock,
     mock_input: Mock,
     mock_subprocess_run: Mock,
 ) -> None:
     """Test the main function with `commit` and interactive 'yes'."""
-    mock_input.return_value = "y"
     with patch("sys.argv", ["gai", "commit"]):
         main.main()
         mock_input.assert_called_once()
@@ -232,28 +343,42 @@ def test_main_commit_interactive_yes(
         )
 
 
-@patch("main.get_diff", return_value="some diff")
-@patch("main.commit_message_from_diff", return_value="feat: Test commit")
-@patch("main._install_pre_commit_hooks_if_needed")
+@patch("subprocess.run")
+@patch("builtins.input", return_value="n")
 @patch("os.environ.copy", return_value={})
+@patch("gai._install_pre_commit_hooks_if_needed", return_value=None)
+@patch("gai.commit_message_from_diff", return_value="feat: Test commit")
+@patch("gai.get_diff", return_value="some diff")
 def test_main_commit_interactive_no(
-    mock_env_copy: Mock,
-    mock_install_hooks: Mock,
-    mock_commit_message: Mock,
     mock_get_diff: Mock,
+    mock_commit_message: Mock,
+    mock_install_hooks: Mock,
+    mock_env_copy: Mock,
     mock_input: Mock,
     mock_subprocess_run: Mock,
 ) -> None:
     """Test the main function with `commit` and interactive 'no'."""
-    mock_input.return_value = "n"
     with patch("sys.argv", ["gai", "commit"]):
         main.main()
         mock_input.assert_called_once()
         mock_subprocess_run.assert_not_called()
 
 
-@patch("main.get_log", return_value="some log")
-@patch("main.summarize_commit_log", return_value="Summary of commits")
+@patch("gai._install_pre_commit_hooks_if_needed")
+@patch(
+    "subprocess.run",
+    side_effect=subprocess.CalledProcessError(1, "cmd", "output", "stderr"),
+)
+def test_main_commit_error(mock_subprocess_run: Mock, mock_install_hooks: Mock) -> None:
+    """Test the main function with `commit` and an error."""
+    with patch("sys.argv", ["gai", "commit", "-m", "my custom message"]):
+        with pytest.raises(SystemExit):
+            main.main()
+        mock_install_hooks.assert_called_once()
+
+
+@patch("gai.get_log", return_value="some log")
+@patch("gai.summarize_commit_log", return_value="Summary of commits")
 def test_main_log(mock_summarize: Mock, mock_get_log: Mock) -> None:
     """Test the main function with `log`."""
     with patch("sys.argv", ["gai", "log"]):
@@ -262,8 +387,8 @@ def test_main_log(mock_summarize: Mock, mock_get_log: Mock) -> None:
         mock_summarize.assert_called_with("some log")
 
 
-@patch("main.get_blame", return_value="some blame")
-@patch("main.explain_blame_output", return_value="Explanation of blame")
+@patch("gai.get_blame", return_value="some blame")
+@patch("gai.explain_blame_output", return_value="Explanation of blame")
 def test_main_blame(mock_explain: Mock, mock_get_blame: Mock) -> None:
     """Test the main function with `blame`."""
     with patch("sys.argv", ["gai", "blame", "file.txt", "1"]):
@@ -272,8 +397,8 @@ def test_main_blame(mock_explain: Mock, mock_get_blame: Mock) -> None:
         mock_explain.assert_called_with("some blame")
 
 
-@patch("main.get_diff", return_value="some diff")
-@patch("main.code_review_from_diff", return_value="LGTM!")
+@patch("gai.get_diff", return_value="some diff")
+@patch("gai.code_review_from_diff", return_value="LGTM!")
 def test_main_review(mock_review: Mock, mock_get_diff: Mock) -> None:
     """Test the main function with `review`."""
     with patch("sys.argv", ["gai", "review"]):
@@ -282,8 +407,8 @@ def test_main_review(mock_review: Mock, mock_get_diff: Mock) -> None:
         mock_review.assert_called_with("some diff")
 
 
-@patch("main.get_diff", return_value="")
-@patch("main._install_pre_commit_hooks_if_needed")
+@patch("gai.get_diff", return_value="")
+@patch("gai._install_pre_commit_hooks_if_needed")
 def test_main_commit_no_changes(
     mock_install_hooks: Mock, mock_get_diff: Mock, mock_subprocess_run: Mock
 ) -> None:
@@ -294,9 +419,9 @@ def test_main_commit_no_changes(
         mock_subprocess_run.assert_not_called()
 
 
-@patch("main.run")
-@patch("main.stash_name_from_diff", return_value="feat: Test stash")
-@patch("main.get_diff", return_value="some diff")
+@patch("gai.run")
+@patch("gai.stash_name_from_diff", return_value="feat: Test stash")
+@patch("gai.get_diff", return_value="some diff")
 def test_main_stash_interactive_yes(
     mock_get_diff: Mock, mock_stash_name: Mock, mock_run: Mock, mock_input: Mock
 ) -> None:
@@ -310,9 +435,9 @@ def test_main_stash_interactive_yes(
         mock_run.assert_called_with(["git", "stash", "push", "-m", "feat: Test stash"])
 
 
-@patch("main.run")
-@patch("main.stash_name_from_diff", return_value="feat: Test stash")
-@patch("main.get_diff", return_value="some diff")
+@patch("gai.run")
+@patch("gai.stash_name_from_diff", return_value="feat: Test stash")
+@patch("gai.get_diff", return_value="some diff")
 def test_main_stash_interactive_no(
     mock_get_diff: Mock, mock_stash_name: Mock, mock_run: Mock, mock_input: Mock
 ) -> None:
@@ -336,9 +461,7 @@ def test_missing_api_key(mock_getenv: Mock) -> None:
     """Test that the program exits if the API key is missing."""
     with pytest.raises(SystemExit) as e:
         # We need to reload main to re-evaluate the API_KEY check
-        import importlib
-
-        importlib.reload(main)
+        _reload_module()
     assert "GEMINI_API_KEY" in str(e.value)
 
 
@@ -347,6 +470,36 @@ def test_invalid_command() -> None:
     with patch("sys.argv", ["gai", "invalid-command"]):
         with pytest.raises(SystemExit):
             main.main()
+
+
+@patch("sys.stdout.isatty", return_value=True)
+@patch("os.getenv", return_value=None)
+@patch("builtins.open", new_callable=mock_open)
+@patch("builtins.input", return_value="test-api-key")
+def test_prompt_for_api_key(mock_input, mock_open_file, mock_getenv, mock_isatty):
+    """Test that the user is prompted for an API key if it's not set."""
+    # We need to reload main to re-evaluate the API_KEY check
+    importlib.reload(main)
+
+    # Check that isatty was called
+    mock_isatty.assert_called_once()
+
+    # Check that input was called
+    mock_input.assert_called_with("Please enter your API key: ")
+
+    # Check that the API key is written to the .env file
+    mock_open_file.assert_called_with(".env", "a")
+    mock_open_file().write.assert_called_with("GEMINI_API_KEY=test-api-key\n")
+
+
+@patch("sys.stdout.isatty", return_value=True)
+@patch("os.getenv", return_value=None)
+@patch("builtins.input", return_value="")
+def test_prompt_for_api_key_empty(mock_input, mock_getenv, mock_isatty):
+    """Test that the program exits if the user provides an empty API key."""
+    with pytest.raises(SystemExit) as e:
+        _reload_module()
+    assert "Gemini API key is required" in str(e.value)
 
 
 @patch("subprocess.run")
@@ -360,7 +513,7 @@ def test_git_passthrough(mock_run: Mock) -> None:
     )
 
 
-@patch("main.get_branch_prefix", return_value="feature")
+@patch("gai.get_branch_prefix", return_value="feature")
 @patch("subprocess.run")
 def test_git_passthrough_branch_rewrite(
     mock_run: Mock, mock_get_branch_prefix: Mock
@@ -377,7 +530,7 @@ def test_git_passthrough_branch_rewrite(
     )
 
 
-@patch("main.get_branch_prefix", return_value="feature")
+@patch("gai.get_branch_prefix", return_value="feature")
 @patch("subprocess.run")
 def test_git_passthrough_branch_rewrite_short(
     mock_run: Mock, mock_get_branch_prefix: Mock
@@ -394,43 +547,71 @@ def test_git_passthrough_branch_rewrite_short(
     )
 
 
-@patch("main.run")
+@patch("gai.run")
 def test_main_config_set_prefix(mock_run: Mock) -> None:
     """Test the main function with `config --branch-prefix`."""
     with patch("sys.argv", ["gai", "config", "--branch-prefix", "feature"]):
-        with patch("argparse.ArgumentParser.parse_known_args") as mock_parse:
-            mock_parse.return_value = (
-                argparse.Namespace(
-                    command="config",
-                    branch_prefix="feature",
-                    google_api_key=None,
-                    gemini_api_key=None,
-                ),
-                [],
-            )
-            main.main()
+        main.main()
     mock_run.assert_called_with(["git", "config", "gai.branch-prefix", "feature"])
 
 
-@patch("main.run")
+@patch("gai.run")
 def test_main_config_unset_prefix(mock_run: Mock) -> None:
     """Test the main function with `config --branch-prefix ''`."""
     with patch("sys.argv", ["gai", "config", "--branch-prefix", ""]):
-        with patch("argparse.ArgumentParser.parse_known_args") as mock_parse:
-            mock_parse.return_value = (
-                argparse.Namespace(
-                    command="config",
-                    branch_prefix="",
-                    google_api_key=None,
-                    gemini_api_key=None,
-                ),
-                [],
-            )
-            main.main()
+        main.main()
     mock_run.assert_called_with(["git", "config", "--unset", "gai.branch-prefix"])
 
 
-@patch("main._install_pre_commit_hooks_if_needed")
+@patch("gai.run")
+@patch(
+    "gai.pr_summary_from_diff", return_value='{"title": "Test PR", "body": "PR body"}'
+)
+@patch("gai.get_default_branch", return_value="main")
+@patch("gai._check_gh_installed", return_value=None)
+def test_main_submit_with_base(
+    mock_check_gh: Mock,
+    mock_get_default_branch: Mock,
+    mock_pr_summary: Mock,
+    mock_run: Mock,
+) -> None:
+    """Test the main function with `submit --base`."""
+    mock_run.return_value = "diff"
+    with patch("sys.argv", ["gai", "submit", "--yes", "--base", "develop"]):
+        main.main()
+    mock_run.assert_any_call(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--title",
+            "Test PR",
+            "--body",
+            "PR body",
+            "--base",
+            "develop",
+        ]
+    )
+
+
+@patch("gai._install_pre_commit_hooks_if_needed")
+@patch(
+    "subprocess.run",
+    side_effect=subprocess.CalledProcessError(1, "cmd"),
+)
+def test_main_test_error(mock_subprocess_run: Mock, mock_install_hooks: Mock) -> None:
+    """Test the main function with `test` and an error."""
+    with patch("sys.argv", ["gai", "test"]):
+        with pytest.raises(SystemExit):
+            main.main()
+        mock_install_hooks.assert_called_once()
+        mock_subprocess_run.assert_called_with(
+            [sys.executable, "-m", "pre_commit", "run", "--all-files"],
+            check=True,
+        )
+
+
+@patch("gai._install_pre_commit_hooks_if_needed")
 @patch("subprocess.run")
 def test_main_test(mock_subprocess_run: Mock, mock_install_hooks: Mock) -> None:
     """Test the main function with `test`."""

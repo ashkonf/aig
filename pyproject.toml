@@ -22,4 +22,10 @@ dev = [
 ]
 
 [project.scripts]
-gai = "main:main"
+gai = "gai:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

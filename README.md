@@ -257,3 +257,4 @@ Thank you for helping improve `aig`!
 ## 🗺️ Roadmap
 
 * A GitHub PR submission wrapper that automatically generates the title and overview.
+* AI-powered command autocomplete.

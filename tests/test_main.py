@@ -107,11 +107,33 @@ def test_get_blame_with_extra_args(mock_run: Mock) -> None:
     mock_run.assert_called_with(["git", "blame", "-L", "1,1", "file.txt", "-w"])
 
 
+@patch("gai.run", return_value="feature\n")
+def test_get_branch_prefix(mock_run: Mock) -> None:
+    """Test that `get_branch_prefix` returns the configured prefix."""
+    prefix = main.get_branch_prefix()
+    assert prefix == "feature"
+    mock_run.assert_called_with(["git", "config", "git.branch-prefix"])
+
+
 @patch("gai.run", side_effect=subprocess.CalledProcessError(1, "cmd"))
 def test_get_branch_prefix_error(mock_run: Mock) -> None:
     """Test that `get_branch_prefix` returns an empty string on error."""
     prefix = main.get_branch_prefix()
     assert prefix == ""
+
+
+@patch("gai.run", return_value="refs/remotes/origin/main\n")
+def test_get_default_branch(mock_run: Mock) -> None:
+    """Test that `get_default_branch` returns the branch name on success."""
+    branch = main.get_default_branch()
+    assert branch == "main"
+    mock_run.assert_called_with(
+        [
+            "git",
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+        ]
+    )
 
 
 @patch("gai.run", side_effect=subprocess.CalledProcessError(1, "cmd"))
@@ -221,6 +243,12 @@ def test_install_pre_commit_hooks_if_needed_error(
     """Test that pre-commit hook installation errors are handled."""
     main._install_pre_commit_hooks_if_needed()
     mock_run.assert_called_once()
+
+
+def test_postprocess_output() -> None:
+    """Test that `_postprocess_output` replaces git references."""
+    result = main._postprocess_output("Git and git")
+    assert result == "gai and gai"
 
 
 # ------------------------------------------------------------------------------

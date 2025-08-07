@@ -89,7 +89,6 @@ You can add the environment variables to your shell's configuration file (e.g., 
 #### `.env` File Example
 
 ```
-PROVIDER="google"
 GEMINI_API_KEY="your-google-api-key-here"
 ```
 

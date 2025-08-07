@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import argparse
 import os
 import subprocess
@@ -8,55 +7,26 @@ from enum import Enum
 from typing import Callable
 from dotenv import load_dotenv
 
-import google.generativeai as genai
-from google.generativeai.types import HarmBlockThreshold, HarmCategory
-
+from . import google, openai, anthropic
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
 
-
-def get_or_prompt_for_api_key() -> str:
-    """
-    Retrieves the API key from environment variables or prompts the user for it.
-    If a new key is provided, it's saved to the .env file.
-    """
-    load_dotenv()
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if api_key:
-        return api_key
-
-    if not sys.stdout.isatty():
-        sys.exit(
-            "🔑 API key not found. Please set GEMINI_API_KEY or GOOGLE_API_KEY in your environment."
-        )
-
-    print("🔑 Gemini API key not found.")
-    api_key = input("Please enter your API key: ").strip()
-
-    if not api_key:
-        sys.exit("❌ Gemini API key is required to use gai.")
-
-    # Save the API key to a .env file for future use.
-    with open(".env", "a") as f:
-        # Add a newline if file is not empty to ensure key is on a new line
-        if f.tell() != 0:
-            f.write("\n")
-        f.write(f"GEMINI_API_KEY={api_key}\n")
-
-    print("✅ API key saved to .env file for future use.")
-
-    # Set the environment variable for the current session
-    os.environ["GEMINI_API_KEY"] = api_key
-
-    return api_key
+load_dotenv()
 
 
-API_KEY: str | None = get_or_prompt_for_api_key()
-genai.configure(api_key=API_KEY)  # type: ignore
-MODEL_NAME: str = os.getenv("MODEL_NAME") or "gemini-1.5-pro-latest"
-_model: genai.GenerativeModel = genai.GenerativeModel(MODEL_NAME)  # type: ignore
+if google.is_available():
+    google.init()
+    ask = google.ask_gemini
+elif openai.is_available():
+    openai.init()
+    ask = openai.ask_openai
+elif anthropic.is_available():
+    anthropic.init()
+    ask = anthropic.ask_anthropic
+else:
+    sys.exit("❌ No API keys found in environment variables.")
 
 
 class Command(str, Enum):
@@ -97,6 +67,14 @@ def get_diff(extra_args: list[str] | None = None) -> str:
     return run(cmd)
 
 
+def get_unstaged_diff(extra_args: list[str] | None = None) -> str:
+    """Return the output of `git diff` (unstaged changes) with optional extra args."""
+    cmd = ["git", "diff"]
+    if extra_args:
+        cmd.extend(extra_args)
+    return run(cmd)
+
+
 def get_log(extra_args: list[str] | None = None) -> str:
     """Return the output of `git log` with optional extra args."""
     cmd = ["git", "log", "-n", "10", "--oneline"]
@@ -114,9 +92,9 @@ def get_blame(path: str, line: str | int, extra_args: list[str] | None = None) -
 
 
 def get_branch_prefix() -> str:
-    """Return the git config value for `git.branch-prefix` or empty string."""
+    """Return the git config value for `aig.branch-prefix` or empty string."""
     try:
-        return run(["git", "config", "git.branch-prefix"]).strip()
+        return run(["git", "config", "aig.branch-prefix"]).strip()
     except subprocess.CalledProcessError:
         return ""
 
@@ -134,46 +112,19 @@ def get_default_branch() -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Gemini wrappers
+# AI Wrappers
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def ask_gemini(prompt: str, max_tokens: int = 400) -> str:
-    """Single‑shot prompt to Gemini, returns trimmed text."""
-    try:
-        response = _model.generate_content(
-            prompt,
-            generation_config={
-                "temperature": 0.3,
-                "max_output_tokens": max_tokens,
-            },
-            safety_settings={
-                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-            },
-        )
-        if response.text.strip().startswith("```") and response.text.strip().endswith(
-            "```"
-        ):
-            return response.text.strip()[3:-3].strip()
-        return response.text.strip()
-    except Exception as e:
-        if "API key not valid" in str(e):
-            sys.exit("❌ Gemini API key is not valid. Please check your .env file.")
-        sys.exit(f"❌ Gemini API error: {e}")
-
-
 def commit_message_from_diff(diff: str) -> str:
-    """Return a commit message from a diff using Gemini."""
+    """Return a commit message from a diff using the selected provider."""
     prompt = (
-        "You are an expert developer. Write a concise, clear gai commit message "
-        "(imperative mood, ≤ 72 chars in the subject) for the following diff. "
+        "You are an expert developer. Write a concise, clear git commit message "
+        "(imperative mood, ≤ 72 chars in the subject) for the following diff. "
         "Start the subject line with a single, relevant, positive emoji.\n\n"
         f"<diff>\n{diff}\n</diff>"
     )
-    return ask_gemini(prompt, max_tokens=60)
+    return ask(prompt, max_tokens=60)
 
 
 def stash_name_from_diff(diff: str) -> str:
@@ -184,29 +135,29 @@ def stash_name_from_diff(diff: str) -> str:
         "Start the subject line with a single, relevant, positive emoji.\n\n"
         f"<diff>\n{diff}\n</diff>"
     )
-    return ask_gemini(prompt, max_tokens=60)
+    return ask(prompt, max_tokens=60)
 
 
 def summarize_commit_log(log: str) -> str:
-    """Return a summary of a commit log using Gemini."""
+    """Return a summary of a commit log using the selected provider."""
     prompt = (
-        "You are an expert developer. Summarize the following gai commit log into "
+        "You are an expert developer. Summarize the following aig commit log into "
         "bullet points, using relevant, positive emojis. Focus on key changes and group "
         "related commits where sensible:\n\n"
         f"<log>\n{log}\n</log>"
     )
-    return ask_gemini(prompt, max_tokens=150)
+    return ask(prompt, max_tokens=150)
 
 
 def explain_blame_output(blame: str) -> str:
-    """Return an explanation of a blame output using Gemini."""
+    """Return an explanation of a blame output using the selected provider."""
     prompt = (
         "You are an expert developer. Explain why this line was changed based on "
-        "the gai blame output and commit hash details. Start with a relevant, positive "
+        "the git blame output and commit hash details. Start with a relevant, positive "
         "emoji and keep it under 120 words:\n\n"
         f"<blame>\n{blame}\n</blame>"
     )
-    return ask_gemini(prompt, max_tokens=100)
+    return ask(prompt, max_tokens=100)
 
 
 def code_review_from_diff(diff: str) -> str:
@@ -218,7 +169,7 @@ def code_review_from_diff(diff: str) -> str:
         "tone, with relevant emojis:\n\n"
         f"<diff>\n{diff}\n</diff>"
     )
-    return ask_gemini(prompt, max_tokens=1000)
+    return ask(prompt, max_tokens=1000)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -238,7 +189,7 @@ def _install_pre_commit_hooks_if_needed():
             )
             print("✅ pre-commit hooks installed successfully.")
         except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            error_message = str(e)
+            error_message: str = str(e)
             print(
                 f"⚠️ Could not install pre-commit hooks: {error_message}",
                 file=sys.stderr,
@@ -246,8 +197,8 @@ def _install_pre_commit_hooks_if_needed():
 
 
 def _postprocess_output(text: str) -> str:
-    """Replace 'git' with 'gai' in the text."""
-    return text.replace("git", "gai").replace("Git", "gai")
+    """Replace 'git' with 'aig' in the text."""
+    return text.replace("git", "aig").replace("Git", "aig")
 
 
 def _handle_test() -> None:
@@ -269,29 +220,29 @@ def _handle_commit(args: argparse.Namespace, extra_args: list[str]) -> None:
     _install_pre_commit_hooks_if_needed()
 
     if args.message:
-        msg = args.message
+        msg: str = args.message
     else:
-        diff = get_diff(extra_args)
+        diff: str = get_diff(extra_args)
         if not diff.strip():
             print("⚠️ No staged changes found.")
             return
-        msg = commit_message_from_diff(diff)
+        msg: str = commit_message_from_diff(diff)
         print("\nSuggested commit message:\n")
         print(msg)
 
     # If message is provided, don't ask for confirmation
     if args.message:
-        should_commit = True
+        should_commit: bool = True
     else:
-        should_commit = args.yes or input(
+        should_commit: bool = args.yes or input(
             "\nUse this commit message? [Y/n] "
         ).strip().lower() in ("", "y", "yes")
 
     if should_commit:
         try:
             # Use -F - to allow for multi-line commit messages
-            commit_cmd = ["git", "commit"]
-            env = os.environ.copy()
+            commit_cmd: list[str] = ["git", "commit"]
+            env: dict[str, str] = os.environ.copy()
             if args.date:
                 commit_cmd.extend(["--date", args.date])
                 env["GIT_AUTHOR_DATE"] = args.date
@@ -320,21 +271,21 @@ def _handle_commit(args: argparse.Namespace, extra_args: list[str]) -> None:
 def _handle_stash(args: argparse.Namespace, extra_args: list[str]) -> None:
     """Handle the 'stash' command."""
     if args.message:
-        msg = args.message
+        msg: str = args.message
     else:
-        diff = get_diff(extra_args)
+        diff: str = get_unstaged_diff(extra_args)
         if not diff.strip():
             print("⚠️ No changes to stash.")
             return
-        msg = stash_name_from_diff(diff)
+        msg: str = stash_name_from_diff(diff)
         print("\nSuggested stash message:\n")
         print(msg)
 
     # If message is provided, don't ask for confirmation
     if args.message:
-        should_stash = True
+        should_stash: bool = True
     else:
-        should_stash = args.yes or input(
+        should_stash: bool = args.yes or input(
             "\nUse this stash message? [Y/n] "
         ).strip().lower() in ("", "y", "yes")
 
@@ -345,31 +296,31 @@ def _handle_stash(args: argparse.Namespace, extra_args: list[str]) -> None:
 
 def _handle_log(args: argparse.Namespace, extra_args: list[str]) -> None:
     """Handle the 'log' command."""
-    log = get_log(extra_args)
+    log: str = get_log(extra_args)
     print("\nRecent commits:\n")
     print(_postprocess_output(log))
-    summary = summarize_commit_log(log)
+    summary: str = summarize_commit_log(log)
     print("\n▶ Summary:\n")
     print(summary)
 
 
 def _handle_blame(args: argparse.Namespace, extra_args: list[str]) -> None:
     """Handle the 'blame' command."""
-    blame = get_blame(args.file, args.line, extra_args)
+    blame: str = get_blame(args.file, args.line, extra_args)
     print("\nBlame output:\n")
     print(_postprocess_output(blame))
-    explanation = explain_blame_output(blame)
+    explanation: str = explain_blame_output(blame)
     print("\n▶ Explanation:\n")
     print(explanation)
 
 
 def _handle_review(args: argparse.Namespace, extra_args: list[str]) -> None:
     """Handle the 'review' command."""
-    diff = get_diff(extra_args)
+    diff: str = get_diff(extra_args)
     if not diff.strip():
         print("⚠️ No staged changes found to review.")
         return
-    review = code_review_from_diff(diff)
+    review: str = code_review_from_diff(diff)
     print("\n▶ Code Review:\n")
     print(review)
 
@@ -378,29 +329,30 @@ def _handle_config(args: argparse.Namespace) -> None:
     """Handle the 'config' command."""
     if args.branch_prefix is not None:
         if args.branch_prefix:
-            run(["git", "config", "gai.branch-prefix", args.branch_prefix])
+            run(["git", "config", "aig.branch-prefix", args.branch_prefix])
             print(f"✅ Branch prefix set to: {args.branch_prefix}")
         else:
-            run(["git", "config", "--unset", "gai.branch-prefix"])
+            run(["git", "config", "--unset", "aig.branch-prefix"])
             print("✅ Branch prefix unset.")
 
 
 def _handle_git_passthrough():
-    if sys.argv[1] in ("checkout", "branch"):
-        # Branch prefix rewriting for `gai checkout -b` or `gai branch`
-        prefix = get_branch_prefix()
-        if prefix and len(sys.argv) >= 3:
-            # `gai checkout -b <branch>`
-            if sys.argv[1] == "checkout" and sys.argv[2] == "-b":
-                if len(sys.argv) > 3:
-                    sys.argv[3] = f"{prefix}/{sys.argv[3]}"
-            # `gai branch <branch>`
-            else:
+    """Pass through the command to git."""
+
+    # Handle branch prefix rewriting for `aig checkout -b <branch>` or `aig branch <branch>`
+    if len(sys.argv) > 1 and sys.argv[1] in ("checkout", "branch"):
+        prefix: str | None = get_branch_prefix()
+        if prefix:
+            if sys.argv[1] == "checkout" and len(sys.argv) > 3 and sys.argv[2] == "-b":
+                sys.argv[3] = f"{prefix}/{sys.argv[3]}"
+            elif sys.argv[1] == "branch" and len(sys.argv) > 2:
                 sys.argv[2] = f"{prefix}/{sys.argv[2]}"
 
     try:
-        # Replace "git" with "gai" in the command's output
-        result = subprocess.run(["git"] + sys.argv[1:], text=True, check=False)
+        # Replace "git" with "aig" in the command's output
+        result: subprocess.CompletedProcess[str] = subprocess.run(
+            ["git"] + sys.argv[1:], text=True, check=False
+        )
         sys.exit(result.returncode)
     except FileNotFoundError:
         sys.exit("❌ git is not installed or not in your PATH.")
@@ -420,10 +372,14 @@ def main() -> None:
             ]:
                 _handle_git_passthrough()
 
-    parser = argparse.ArgumentParser(prog="gai", description="AI-enhanced git wrapper")
-    subs = parser.add_subparsers(dest="command", required=True)
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+        prog="aig", description="AI-enhanced git wrapper"
+    )
+    subs: argparse._SubParsersAction = parser.add_subparsers(
+        dest="command", required=True
+    )
 
-    commit_p = subs.add_parser(
+    commit_p: argparse.ArgumentParser = subs.add_parser(
         Command.COMMIT.value, help="Generate a commit message from staged changes"
     )
     commit_p.add_argument(
@@ -434,7 +390,7 @@ def main() -> None:
     )
     commit_p.add_argument("--date", help="Override the date of the commit")
 
-    stash_p = subs.add_parser(
+    stash_p: argparse.ArgumentParser = subs.add_parser(
         Command.STASH.value, help="Generate a stash message from staged changes"
     )
     stash_p.add_argument(
@@ -449,16 +405,22 @@ def main() -> None:
         Command.REVIEW.value, help="Request a code review on staged changes"
     )
 
-    blame_p = subs.add_parser(Command.BLAME.value, help="Explain a line change")
+    blame_p: argparse.ArgumentParser = subs.add_parser(
+        Command.BLAME.value, help="Explain a line change"
+    )
     blame_p.add_argument("file", help="Path to the file")
     blame_p.add_argument("line", help="Line number")
 
-    config_p = subs.add_parser(Command.CONFIG.value, help="Set configuration for gai")
+    config_p: argparse.ArgumentParser = subs.add_parser(
+        Command.CONFIG.value, help="Set configuration for aig"
+    )
     config_p.add_argument(
         "--branch-prefix",
-        help="Set a prefix for new branches created with `gai checkout -b`",
+        help="Set a prefix for new branches created with `aig checkout -b`",
     )
 
+    args: argparse.Namespace
+    extra_args: list[str]
     args, extra_args = parser.parse_known_args()
 
     handlers: dict[Command, Callable[..., None]] = {

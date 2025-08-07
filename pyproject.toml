@@ -1,5 +1,5 @@
 [project]
-name = "gai"
+name = "aig"
 version = "0.1.0"
 description = "AI‑enhanced git wrapper"
 authors = [
@@ -10,22 +10,34 @@ requires-python = ">=3.9"
 dependencies = [
     "google-generativeai",
     "python-dotenv",
+    "openai",
+    "anthropic",
+    "pytest-mock>=3.14.1",
+    "pre-commit>=4.2.0",
+    "pytest-cov>=6.2.1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
-    "pytest-cov",
+    "pytest-mock",
+    "pytest-dotenv",
     "pre-commit>=4.2.0",
     "ruff>=0.12.7",
     "pyright>=1.1.403",
 ]
 
 [project.scripts]
-gai = "gai:main"
+aig = "aig:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+omit = ["src/aig/__main__.py"]

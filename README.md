@@ -34,8 +34,7 @@
 
 -   **Seamless Integration**: Acts as a drop-in replacement for `git`. You can even alias `git` to `aig` for a fully integrated experience.
 -   **AI-Powered Commits**: Generate clear, conventional commit messages from your staged changes automatically. Backdated commits are easily supported too.
--   **Code Insights**: Get quick summaries of your commit history (`aig log`), understand the "why" behind code changes (`aig blame`), and even get a code review on your work (`aig review`).
--   **Extensible**: `aig` is built to be easily extensible with new AI-powered commands.
+-   **Code Insights**: Get quick summaries of your commit history (`aig log`), understand the "why" behind code changes (`aig blame`), and get a code review on your work (`aig review`).
 
 ## ✨ Features
 

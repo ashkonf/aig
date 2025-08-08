@@ -3,30 +3,36 @@ import argparse
 import os
 import subprocess
 import sys
+import difflib
+import importlib
 from enum import Enum
 from typing import Callable
 from dotenv import load_dotenv
 
-from . import google, openai, anthropic
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Configuration
-# ──────────────────────────────────────────────────────────────────────────────
+# Optional argcomplete support at import time
+try:
+    from argcomplete import autocomplete as _argcomplete_autocomplete  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    _argcomplete_autocomplete: Callable | None = None  # type: ignore
 
 load_dotenv()
 
+from .ai import (
+    commit_message_from_diff,
+    stash_name_from_diff,
+    summarize_commit_log,
+    explain_blame_output,
+    code_review_from_diff,
+)
 
-if google.is_available():
-    google.init()
-    ask = google.ask_gemini
-elif openai.is_available():
-    openai.init()
-    ask = openai.ask_openai
-elif anthropic.is_available():
-    anthropic.init()
-    ask = anthropic.ask_anthropic
-else:
-    sys.exit("❌ No API keys found in environment variables.")
+from .git import (
+    run,
+    get_diff,
+    get_unstaged_diff,
+    get_log,
+    get_blame,
+    get_branch_prefix,
+)
 
 
 class Command(str, Enum):
@@ -39,145 +45,7 @@ class Command(str, Enum):
     REVIEW = "review"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Helper: shell
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def run(cmd: list[str]) -> str:
-    """Run a shell command and return UTF‑8 output (raises on error)."""
-    try:
-        return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
-    except FileNotFoundError:
-        sys.exit(f"❌ Command not found: {cmd[0]}. Is it in your PATH?")
-    except subprocess.CalledProcessError as e:
-        sys.exit(f"❌ Command failed: {' '.join(cmd)}\n{e.output}")
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Git plumbing
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def get_diff(extra_args: list[str] | None = None) -> str:
-    """Return the output of `git diff --cached` with optional extra args."""
-    cmd = ["git", "diff", "--cached"]
-    if extra_args:
-        cmd.extend(extra_args)
-    return run(cmd)
-
-
-def get_unstaged_diff(extra_args: list[str] | None = None) -> str:
-    """Return the output of `git diff` (unstaged changes) with optional extra args."""
-    cmd = ["git", "diff"]
-    if extra_args:
-        cmd.extend(extra_args)
-    return run(cmd)
-
-
-def get_log(extra_args: list[str] | None = None) -> str:
-    """Return the output of `git log` with optional extra args."""
-    cmd = ["git", "log", "-n", "10", "--oneline"]
-    if extra_args:
-        cmd.extend(extra_args)
-    return run(cmd)
-
-
-def get_blame(path: str, line: str | int, extra_args: list[str] | None = None) -> str:
-    """Return the output of `git blame` for a specific line."""
-    cmd = ["git", "blame", "-L", f"{line},{line}", path]
-    if extra_args:
-        cmd.extend(extra_args)
-    return run(cmd)
-
-
-def get_branch_prefix() -> str:
-    """Return the git config value for `aig.branch-prefix` or empty string."""
-    try:
-        return run(["git", "config", "aig.branch-prefix"]).strip()
-    except subprocess.CalledProcessError:
-        return ""
-
-
-def get_default_branch() -> str:
-    """Return the default branch of the repository."""
-    try:
-        return (
-            run(["git", "symbolic-ref", "refs/remotes/origin/HEAD"])
-            .split("/")[-1]
-            .strip()
-        )
-    except subprocess.CalledProcessError:
-        return "main"
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# AI Wrappers
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def commit_message_from_diff(diff: str) -> str:
-    """Return a commit message from a diff using the selected provider."""
-    prompt = (
-        "You are an expert developer. Write a concise, clear git commit message "
-        "(imperative mood, ≤ 72 chars in the subject) for the following diff. "
-        "Start the subject line with a single, relevant, positive emoji.\n\n"
-        f"<diff>\n{diff}\n</diff>"
-    )
-    return ask(prompt, max_tokens=60)
-
-
-def stash_name_from_diff(diff: str) -> str:
-    """Return a stash name from a diff."""
-    prompt = (
-        "You are an expert developer. Write a concise, clear stash message "
-        "(imperative mood, ≤ 72 chars in the subject) for the following diff. "
-        "Start the subject line with a single, relevant, positive emoji.\n\n"
-        f"<diff>\n{diff}\n</diff>"
-    )
-    return ask(prompt, max_tokens=60)
-
-
-def summarize_commit_log(log: str) -> str:
-    """Return a summary of a commit log using the selected provider."""
-    prompt = (
-        "You are an expert developer. Summarize the following aig commit log into "
-        "bullet points, using relevant, positive emojis. Focus on key changes and group "
-        "related commits where sensible:\n\n"
-        f"<log>\n{log}\n</log>"
-    )
-    return ask(prompt, max_tokens=150)
-
-
-def explain_blame_output(blame: str) -> str:
-    """Return an explanation of a blame output using the selected provider."""
-    prompt = (
-        "You are an expert developer. Explain why this line was changed based on "
-        "the git blame output and commit hash details. Start with a relevant, positive "
-        "emoji and keep it under 120 words:\n\n"
-        f"<blame>\n{blame}\n</blame>"
-    )
-    return ask(prompt, max_tokens=100)
-
-
-def code_review_from_diff(diff: str) -> str:
-    """Return a code review from a diff."""
-    prompt = (
-        "You are an expert developer. Review the following code changes and "
-        "provide feedback. Focus on identifying potential bugs, performance "
-        "issues, and areas for improvement. Use a positive and constructive "
-        "tone, with relevant emojis:\n\n"
-        f"<diff>\n{diff}\n</diff>"
-    )
-    return ask(prompt, max_tokens=1000)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# CLI
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def _install_pre_commit_hooks_if_needed():
+def _install_pre_commit_hooks_if_needed() -> None:
     """Install pre-commit hooks if they are not already installed."""
     if not os.path.exists(os.path.join(".git", "hooks", "pre-commit")):
         print("▶ pre-commit hooks not found. Installing...")
@@ -201,6 +69,126 @@ def _postprocess_output(text: str) -> str:
     return text.replace("git", "aig").replace("Git", "aig")
 
 
+def _install_argcomplete_if_missing() -> bool:  # pragma: no cover - interactive optional install
+    """Install argcomplete with pip if missing and return True if importable (interactive)."""
+    try:
+        if importlib.util.find_spec("argcomplete") is not None:  # type: ignore[attr-defined]
+            return True
+        # Determine environment (venv vs system) to decide on --user
+        in_virtualenv: bool = (
+            os.environ.get("VIRTUAL_ENV") is not None
+            or getattr(sys, "base_prefix", sys.prefix) != sys.prefix
+        )
+
+        pip_cmd: list[str] = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--quiet",
+            "argcomplete",
+        ]
+        if not in_virtualenv:
+            pip_cmd.insert(4, "--user")
+
+        print("▶ Installing argcomplete for tab-completion...", file=sys.stderr)
+        subprocess.run(pip_cmd, check=True, text=True)
+
+        # Re-check availability
+        return importlib.util.find_spec("argcomplete") is not None  # type: ignore[attr-defined]
+    except Exception:
+        return False
+
+
+def _is_interactive_stdout() -> bool:  # pragma: no cover - environment dependent
+    """Return True if stdout is attached to a TTY (interactive)."""
+    try:
+        return sys.stdout.isatty()
+    except Exception:
+        return False
+
+
+def _collect_git_subcommands() -> list[str]:  # pragma: no cover - depends on local git help output
+    """Collect git subcommands by parsing `git help -a` output (best-effort)."""
+    help_out: str = run(["git", "help", "-a"])
+    candidates: list[str] = []
+    for line in help_out.splitlines():
+        stripped: str = line.strip()
+        if not stripped or stripped.startswith("usage:"):
+            continue
+        for token in stripped.split():
+            if token.isalpha() and token.islower():
+                candidates.append(token)
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    return [c for c in candidates if not (c in seen or seen.add(c))]
+
+
+def _suggest_git_subcommands(partial_subcommand: str) -> list[str]:  # pragma: no cover - UX helper
+    """Return suggested git subcommands for a partial token, preferring prefix then close matches."""
+    try:
+        commands_list: list[str] = _collect_git_subcommands()
+    except SystemExit:
+        return []
+
+    # Prefix matches
+    prefix_matches: list[str] = [
+        c for c in commands_list if c.startswith(partial_subcommand)
+    ]
+    # Close matches
+    close_matches: list[str] = difflib.get_close_matches(
+        partial_subcommand, commands_list, n=5, cutoff=0.6
+    )
+    suggestions: list[str] = []
+    for item in prefix_matches + close_matches:
+        if item not in suggestions:
+            suggestions.append(item)
+    return suggestions
+
+
+def _maybe_print_suggestions_for_partial(  # pragma: no cover - interactive UX
+    partial_subcommand: str, limit: int = 8
+) -> None:
+    """Print suggestions if any for the given partial subcommand (interactive only)."""
+    if (
+        not _is_interactive_stdout()
+        or not partial_subcommand
+        or partial_subcommand.startswith("-")
+    ):
+        return
+    suggestions: list[str] = _suggest_git_subcommands(partial_subcommand)
+    if suggestions:
+        print("💡 Did you mean:", ", ".join(suggestions[:limit]))
+
+
+def _enable_argcomplete_if_possible(parser: argparse.ArgumentParser) -> None:  # pragma: no cover - interactive optional completion
+    """Enable argcomplete on the parser, attempting install if missing (interactive shells only)."""
+    if not _is_interactive_stdout():
+        return
+
+    autocomplete_func: Callable | None = _argcomplete_autocomplete
+    if autocomplete_func is None:
+        if _install_argcomplete_if_missing():
+            try:
+                module = importlib.import_module("argcomplete")
+                autocomplete_func = getattr(module, "autocomplete", None)
+            except Exception:
+                autocomplete_func = None
+
+    try:
+        if callable(autocomplete_func):  # type: ignore[call-arg]
+            autocomplete_func(parser)  # type: ignore[misc]
+        else:
+            print(
+                "💡 Tip: Install and enable argcomplete for tab completion: "
+                "pip install argcomplete && activate-global-python-argcomplete",
+                file=sys.stderr,
+            )
+    except Exception:
+        # Ignore argcomplete runtime errors
+        pass
+
+
 def _handle_test() -> None:
     """Handle the 'test' command."""
     _install_pre_commit_hooks_if_needed()
@@ -215,57 +203,86 @@ def _handle_test() -> None:
         sys.exit(f"❌ Pre-commit hooks failed with error: {e}")
 
 
+def _generate_commit_message_from_staged_changes(
+    extra_args: list[str],
+) -> str | None:
+    """Return an AI-generated commit message for staged changes, or None if no diff."""
+    diff: str = get_diff(extra_args)
+    if not diff.strip():
+        return None
+    return commit_message_from_diff(diff)
+
+
+def _prepare_commit_message(
+    args: argparse.Namespace, extra_args: list[str]
+) -> tuple[str | None, bool]:
+    """Prepare the commit message and return (message or None, provided_by_user)."""
+    if getattr(args, "message", None):
+        return args.message, True
+
+    msg: str | None = _generate_commit_message_from_staged_changes(extra_args)
+    if msg is None:
+        print("⚠️ No staged changes found.")
+        return None, False
+
+    print("\nSuggested commit message:\n")
+    print(msg)
+    return msg, False
+
+
+def _confirm_commit(args: argparse.Namespace, message_was_provided: bool) -> bool:
+    """Return True if we should proceed with committing."""
+    if message_was_provided:
+        return True
+    return args.yes or input("\nUse this commit message? [Y/n] ").strip().lower() in (
+        "",
+        "y",
+        "yes",
+    )
+
+
+def _run_git_commit(msg: str, args: argparse.Namespace, extra_args: list[str]) -> None:
+    """Execute `git commit` with the given message and args, handling errors."""
+    try:
+        commit_cmd: list[str] = ["git", "commit"]
+        env: dict[str, str] = os.environ.copy()
+        if getattr(args, "date", None):
+            commit_cmd.extend(["--date", args.date])
+            env["GIT_AUTHOR_DATE"] = args.date
+            env["GIT_COMMITTER_DATE"] = args.date
+        commit_cmd.extend(["-F", "-"])
+        if getattr(args, "yes", False):
+            commit_cmd.append("--yes")
+        commit_cmd.extend(extra_args)
+        subprocess.run(
+            commit_cmd,
+            input=msg,
+            check=True,
+            text=True,
+            env=env,
+        )
+        print("✅ Commit successful.")
+    except subprocess.CalledProcessError as e:
+        print("❌ Commit failed.", file=sys.stderr)
+        if e.stdout:
+            print(_postprocess_output(e.stdout), file=sys.stderr)
+        if e.stderr:
+            print(_postprocess_output(e.stderr), file=sys.stderr)
+        sys.exit(1)
+
+
 def _handle_commit(args: argparse.Namespace, extra_args: list[str]) -> None:
     """Handle the 'commit' command."""
     _install_pre_commit_hooks_if_needed()
 
-    if args.message:
-        msg: str = args.message
-    else:
-        diff: str = get_diff(extra_args)
-        if not diff.strip():
-            print("⚠️ No staged changes found.")
-            return
-        msg: str = commit_message_from_diff(diff)
-        print("\nSuggested commit message:\n")
-        print(msg)
+    msg, message_was_provided = _prepare_commit_message(args, extra_args)
+    if not msg:
+        return
 
-    # If message is provided, don't ask for confirmation
-    if args.message:
-        should_commit: bool = True
-    else:
-        should_commit: bool = args.yes or input(
-            "\nUse this commit message? [Y/n] "
-        ).strip().lower() in ("", "y", "yes")
+    if not _confirm_commit(args, message_was_provided):
+        return
 
-    if should_commit:
-        try:
-            # Use -F - to allow for multi-line commit messages
-            commit_cmd: list[str] = ["git", "commit"]
-            env: dict[str, str] = os.environ.copy()
-            if args.date:
-                commit_cmd.extend(["--date", args.date])
-                env["GIT_AUTHOR_DATE"] = args.date
-                env["GIT_COMMITTER_DATE"] = args.date
-            commit_cmd.extend(["-F", "-"])
-            if args.yes:
-                commit_cmd.append("--yes")
-            commit_cmd.extend(extra_args)
-            subprocess.run(
-                commit_cmd,
-                input=msg,
-                check=True,
-                text=True,
-                env=env,
-            )
-            print("✅ Commit successful.")
-        except subprocess.CalledProcessError as e:
-            print("❌ Commit failed.", file=sys.stderr)
-            if e.stdout:
-                print(_postprocess_output(e.stdout), file=sys.stderr)
-            if e.stderr:
-                print(_postprocess_output(e.stderr), file=sys.stderr)
-            sys.exit(1)
+    _run_git_commit(msg, args, extra_args)
 
 
 def _handle_stash(args: argparse.Namespace, extra_args: list[str]) -> None:
@@ -336,7 +353,7 @@ def _handle_config(args: argparse.Namespace) -> None:
             print("✅ Branch prefix unset.")
 
 
-def _handle_git_passthrough():
+def _handle_git_passthrough() -> None:
     """Pass through the command to git."""
 
     # Handle branch prefix rewriting for `aig checkout -b <branch>` or `aig branch <branch>`
@@ -348,8 +365,14 @@ def _handle_git_passthrough():
             elif sys.argv[1] == "branch" and len(sys.argv) > 2:
                 sys.argv[2] = f"{prefix}/{sys.argv[2]}"
 
+    # Inline suggestions for partial git subcommands (interactive only)
     try:
         # Replace "git" with "aig" in the command's output
+        # Before executing, if running interactively and the first token looks like
+        # a partial/unknown git command, suggest likely matches.
+        if len(sys.argv) > 1:
+            _maybe_print_suggestions_for_partial(sys.argv[1])
+
         result: subprocess.CompletedProcess[str] = subprocess.run(
             ["git"] + sys.argv[1:], text=True, check=False
         )
@@ -375,6 +398,9 @@ def main() -> None:
     parser: argparse.ArgumentParser = argparse.ArgumentParser(
         prog="aig", description="AI-enhanced git wrapper"
     )
+    # Enable argcomplete-based completion if available; try to install if missing
+    _enable_argcomplete_if_possible(parser)
+
     subs: argparse._SubParsersAction = parser.add_subparsers(
         dest="command", required=True
     )

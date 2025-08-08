@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock
 import pytest
 from aig import google
@@ -129,3 +130,32 @@ def test_model_name_from_env(mock_generative_model: MagicMock, monkeypatch: Magi
     monkeypatch.setenv("MODEL_NAME", "test-model")
     google.ask_gemini("test prompt")
     mock_generative_model.assert_called_with("test-model")
+
+
+# --- Live integration tests moved from tests/test_google_integration.py ---
+integration = pytest.mark.integration
+skip_if_no_key = pytest.mark.skipif(
+    os.getenv("GOOGLE_API_KEY") is None and os.getenv("GEMINI_API_KEY") is None,
+    reason="GOOGLE_API_KEY/GEMINI_API_KEY not set; skipping live Gemini integration tests",
+)
+
+
+@integration
+@skip_if_no_key
+def test_gemini_init_available(monkeypatch: pytest.MonkeyPatch):
+    # Prefer a faster/cheaper model for live tests if available
+    monkeypatch.setenv("MODEL_NAME", os.getenv("MODEL_NAME", "gemini-1.5-flash-latest"))
+    assert google.is_available() is True
+    # Should not exit when a key is present
+    google.init()
+
+
+@integration
+@skip_if_no_key
+def test_gemini_ask_live(monkeypatch: pytest.MonkeyPatch):
+    # Prefer a faster/cheaper model for live tests if available
+    monkeypatch.setenv("MODEL_NAME", os.getenv("MODEL_NAME", "gemini-1.5-flash-latest"))
+    google.init()
+    response = google.ask_gemini("Respond with exactly: PONG", max_tokens=10)
+    assert isinstance(response, str)
+    assert "pong" in response.strip().lower()

@@ -15,6 +15,7 @@ dependencies = [
     "pytest-mock>=3.14.1",
     "pre-commit>=4.2.0",
     "pytest-cov>=6.2.1",
+    "argcomplete>=3.6.2",
 ]
 
 [project.optional-dependencies]

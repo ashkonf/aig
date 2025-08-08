@@ -7,15 +7,12 @@ import difflib
 import importlib
 from enum import Enum
 from typing import Callable
-from dotenv import load_dotenv
 
 # Optional argcomplete support at import time
 try:
     from argcomplete import autocomplete as _argcomplete_autocomplete  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     _argcomplete_autocomplete: Callable | None = None  # type: ignore
-
-load_dotenv()
 
 from .ai import (
     commit_message_from_diff,
@@ -69,7 +66,9 @@ def _postprocess_output(text: str) -> str:
     return text.replace("git", "aig").replace("Git", "aig")
 
 
-def _install_argcomplete_if_missing() -> bool:  # pragma: no cover - interactive optional install
+def _install_argcomplete_if_missing() -> (
+    bool
+):  # pragma: no cover - interactive optional install
     """Install argcomplete with pip if missing and return True if importable (interactive)."""
     try:
         if importlib.util.find_spec("argcomplete") is not None:  # type: ignore[attr-defined]
@@ -108,7 +107,9 @@ def _is_interactive_stdout() -> bool:  # pragma: no cover - environment dependen
         return False
 
 
-def _collect_git_subcommands() -> list[str]:  # pragma: no cover - depends on local git help output
+def _collect_git_subcommands() -> list[
+    str
+]:  # pragma: no cover - depends on local git help output
     """Collect git subcommands by parsing `git help -a` output (best-effort)."""
     help_out: str = run(["git", "help", "-a"])
     candidates: list[str] = []
@@ -124,7 +125,9 @@ def _collect_git_subcommands() -> list[str]:  # pragma: no cover - depends on lo
     return [c for c in candidates if not (c in seen or seen.add(c))]
 
 
-def _suggest_git_subcommands(partial_subcommand: str) -> list[str]:  # pragma: no cover - UX helper
+def _suggest_git_subcommands(
+    partial_subcommand: str,
+) -> list[str]:  # pragma: no cover - UX helper
     """Return suggested git subcommands for a partial token, preferring prefix then close matches."""
     try:
         commands_list: list[str] = _collect_git_subcommands()
@@ -161,7 +164,9 @@ def _maybe_print_suggestions_for_partial(  # pragma: no cover - interactive UX
         print("💡 Did you mean:", ", ".join(suggestions[:limit]))
 
 
-def _enable_argcomplete_if_possible(parser: argparse.ArgumentParser) -> None:  # pragma: no cover - interactive optional completion
+def _enable_argcomplete_if_possible(
+    parser: argparse.ArgumentParser,
+) -> None:  # pragma: no cover - interactive optional completion
     """Enable argcomplete on the parser, attempting install if missing (interactive shells only)."""
     if not _is_interactive_stdout():
         return

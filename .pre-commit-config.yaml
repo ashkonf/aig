@@ -19,7 +19,7 @@ repos:
         pass_filenames: false
       - id: pytest
         name: pytest
-        entry: uv run --extra dev pytest --cov --cov-branch
+        entry: uv run --extra dev pytest -q --cov --cov-branch
         language: system
         types: [python]
         pass_filenames: false

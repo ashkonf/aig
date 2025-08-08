@@ -2,7 +2,14 @@ import subprocess
 from unittest.mock import patch
 import pytest
 
-from aig.git import run, get_diff, get_unstaged_diff, get_log, get_blame, get_branch_prefix
+from aig.git import (
+    run,
+    get_diff,
+    get_unstaged_diff,
+    get_log,
+    get_blame,
+    get_branch_prefix,
+)
 
 
 # run() tests (moved from test_init.py and test_edge_cases_comprehensive.py)
@@ -62,14 +69,16 @@ def test_get_log(mock_run):
     assert get_log() == "commit log"
     mock_run.assert_called_with(["git", "log", "-n", "10", "--oneline"])
     assert get_log(["--author=test"]) == "commit log"
-    mock_run.assert_called_with([
-        "git",
-        "log",
-        "-n",
-        "10",
-        "--oneline",
-        "--author=test",
-    ])
+    mock_run.assert_called_with(
+        [
+            "git",
+            "log",
+            "-n",
+            "10",
+            "--oneline",
+            "--author=test",
+        ]
+    )
 
 
 @patch("aig.run", return_value="blame output")
@@ -80,7 +89,10 @@ def test_get_blame(mock_run):
     mock_run.assert_called_with(["git", "blame", "-L", "10,10", "file.py", "-w"])
 
 
-@patch("aig.git._patched_run_if_present", side_effect=subprocess.CalledProcessError(1, "git config"))
+@patch(
+    "aig.git._patched_run_if_present",
+    side_effect=subprocess.CalledProcessError(1, "git config"),
+)
 def test_get_branch_prefix_exception_handling(_mock_patched_run):
     result = get_branch_prefix()
     assert result == ""
@@ -111,4 +123,3 @@ def test_get_unstaged_diff(mock_run):
 def test_very_long_command_output(mock_run):
     result = get_log()
     assert len(result) == 50000
-

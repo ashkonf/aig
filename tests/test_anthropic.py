@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from anthropic.types import TextBlock
 import aig
+import aig.anthropic
 from aig.anthropic import is_available, init, ask_anthropic
 
 

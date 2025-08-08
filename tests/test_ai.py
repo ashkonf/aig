@@ -196,5 +196,3 @@ class TestEnvironmentVariables:
     def test_default_model_name(self, mock_ask):
         commit_message_from_diff("test diff")
         mock_ask.assert_called_once()
-
-

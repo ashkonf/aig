@@ -2,6 +2,7 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 import aig
+import aig.openai
 from aig.openai import is_available, init, ask_openai
 
 

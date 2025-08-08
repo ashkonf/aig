@@ -24,6 +24,7 @@
 - [🛠️ Development](#-development)
 - [📄 License](#-license)
 - [🤝 Contributing](#-contributing)
+- [🙏 Acknowledgements](#-acknowledgements)
 - [🗺️ Roadmap](#-roadmap)
 
 ---
@@ -253,7 +254,12 @@ Please ensure your code is well-tested and follows the existing style. For major
 
 Thank you for helping improve `aig`!
 
+## 🙏 Acknowledgements
+
+This project was inspired by [aicommits](https://github.com/Nutlope/aicommits).
+
 ## 🗺️ Roadmap
 
 * A GitHub PR submission wrapper that automatically generates the title and overview.
 * AI-powered command autocomplete.
+* Configurable system prompts.

@@ -36,9 +36,16 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+markers = [
+  "integration: marks tests as integration (deselect with -m 'not integration')",
+]
 
 [tool.coverage.run]
 branch = true
 
 [tool.coverage.report]
 omit = ["src/aig/__main__.py"]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"

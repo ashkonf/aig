@@ -1,8 +1,11 @@
 import argparse
 import os
 import subprocess
+import sys
 from unittest.mock import MagicMock, patch
 import pytest
+from pathlib import Path
+
 from aig import (
     Command,
     _handle_blame,
@@ -14,6 +17,22 @@ from aig import (
     _install_pre_commit_hooks_if_needed,
     _postprocess_output,
     _handle_test,
+    _handle_git_passthrough,
+    main,
+)
+
+from aig.git import (
+    get_diff,
+    get_log,
+    get_branch_prefix,
+)
+
+from aig.ai import (
+    commit_message_from_diff,
+    stash_name_from_diff,
+    summarize_commit_log,
+    explain_blame_output,
+    code_review_from_diff,
 )
 
 
@@ -412,44 +431,6 @@ def test_help_message_short(mocker):
         from aig import main
 
         main()
-
-
-# ===== Consolidated from tests/test_edge_cases_comprehensive.py =====
-import argparse
-import os
-import subprocess
-import sys
-from unittest.mock import MagicMock, patch
-import pytest
-from aig.git import (
-    get_diff,
-    get_log,
-    get_blame,
-    get_branch_prefix,
-)
-from aig.ai import (
-    commit_message_from_diff,
-    stash_name_from_diff,
-    summarize_commit_log,
-    explain_blame_output,
-    code_review_from_diff,
-)
-from aig import (
-    _install_pre_commit_hooks_if_needed,
-    _postprocess_output,
-    _handle_commit,
-    _handle_stash,
-    _handle_blame,
-    _handle_git_passthrough,
-    main,
-)
-from aig.ai import (
-    commit_message_from_diff,
-    stash_name_from_diff,
-    summarize_commit_log,
-    explain_blame_output,
-    code_review_from_diff,
-)
 
 
 class TestRunFunction:
@@ -958,7 +939,10 @@ class TestErrorRecovery:
         with pytest.raises(OSError):
             _install_pre_commit_hooks_if_needed()
 
-    @patch("aig.git._patched_run_if_present", side_effect=subprocess.CalledProcessError(128, "git"))
+    @patch(
+        "aig.git._patched_run_if_present",
+        side_effect=subprocess.CalledProcessError(128, "git"),
+    )
     def test_git_command_retry_pattern(self, _mock_patched_run):
         """Test pattern where git command might fail initially."""
         # This tests that CalledProcessError propagates correctly through run()
@@ -1036,20 +1020,6 @@ class TestArgumentParsingEdgeCases:
         for cmd in Command:
             assert isinstance(cmd.value, str)
             assert len(cmd.value) > 0
-
-
-# ===== Consolidated from tests/test_coverage_completion.py =====
-import argparse
-import os
-import subprocess
-from unittest.mock import MagicMock, patch
-import pytest
-from aig import (
-    _handle_commit,
-    _handle_test,
-    _handle_git_passthrough,
-    main,
-)
 
 
 @pytest.fixture
@@ -1450,7 +1420,7 @@ def test_patched_run_when_pkg_none_and_unstaged_diff_with_args():
         mock_run.return_value = "ok"
         # Make sys.modules return None for 'aig' to follow the simple false branch
         with patch.dict(_sys.modules, {"aig": None}, clear=False):
-            result = git_mod.get_unstaged_diff(["--name-only"]) 
+            result = git_mod.get_unstaged_diff(["--name-only"])
             assert result == "ok"
             mock_run.assert_called_with(["git", "diff", "--name-only"])
 
@@ -1460,7 +1430,7 @@ class TestArgcompleteOptionalInstall:
 
     def test_install_argcomplete_already_present(self):
         from aig import _install_argcomplete_if_missing
-        import importlib
+
         with patch("importlib.util.find_spec", return_value=object()):
             with patch("subprocess.run") as mock_subproc:
                 assert _install_argcomplete_if_missing() is True
@@ -1468,7 +1438,7 @@ class TestArgcompleteOptionalInstall:
 
     def test_install_argcomplete_installs_with_user_flag(self, monkeypatch):
         from aig import _install_argcomplete_if_missing
-        import importlib
+
         calls = [None, object()]
 
         def fake_find_spec(_name):
@@ -1484,7 +1454,96 @@ class TestArgcompleteOptionalInstall:
 
     def test_install_argcomplete_install_failure(self):
         from aig import _install_argcomplete_if_missing
+
         with patch("importlib.util.find_spec", return_value=None):
             with patch("subprocess.run", side_effect=Exception("boom")):
                 assert _install_argcomplete_if_missing() is False
 
+
+def _project_src_dir() -> str:
+    # Resolve to absolute path of this repo's src directory
+    return str(Path(__file__).resolve().parents[1] / "src")
+
+
+def _base_env_with_gemini() -> dict[str, str]:
+    env = os.environ.copy()
+    # Ensure the aig module is importable when running from a temp repo
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        f"{_project_src_dir()}:{existing_pythonpath}"
+        if existing_pythonpath
+        else _project_src_dir()
+    )
+    # Prefer a faster/cheaper model for live tests
+    env.setdefault("MODEL_NAME", "gemini-1.5-flash-latest")
+    return env
+
+
+def _run(
+    cmd: list[str], cwd: Path, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, cwd=str(cwd), env=env, text=True, capture_output=True)
+
+
+def _init_git_repo(repo_dir: Path) -> None:
+    _run(["git", "init"], cwd=repo_dir, env=os.environ.copy())
+    _run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo_dir,
+        env=os.environ.copy(),
+    )
+    _run(
+        ["git", "config", "user.name", "Test User"], cwd=repo_dir, env=os.environ.copy()
+    )
+
+
+skip_if_no_key = pytest.mark.skipif(
+    os.getenv("GOOGLE_API_KEY") is None and os.getenv("GEMINI_API_KEY") is None,
+    reason="GOOGLE_API_KEY/GEMINI_API_KEY not set; skipping CLI Gemini E2E tests",
+)
+
+
+@pytest.mark.integration
+@skip_if_no_key
+def test_cli_commit_log_blame_with_gemini_e2e(tmp_path: Path):
+    env = _base_env_with_gemini()
+
+    # Set up a new git repo with one staged file
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+
+    file_path = repo / "hello.txt"
+    file_path.write_text("hello world\n")
+
+    # Stage the file
+    res = _run(["git", "add", "hello.txt"], cwd=repo, env=env)
+    assert res.returncode == 0, res.stderr
+
+    # Commit using aig with an explicit message to avoid interactive confirmation
+    res = _run(
+        [sys.executable, "-m", "aig", "commit", "-m", "test commit", "--no-verify"],
+        cwd=repo,
+        env=env,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "Commit successful" in res.stdout
+
+    # Verify a commit exists
+    res = _run(["git", "rev-parse", "HEAD"], cwd=repo, env=env)
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip()
+
+    # Run aig log (summarization uses Gemini)
+    res = _run([sys.executable, "-m", "aig", "log"], cwd=repo, env=env)
+    assert res.returncode == 0, res.stderr
+    assert "Recent commits:" in res.stdout
+    assert "▶ Summary:" in res.stdout
+
+    # Blame the first line and get an explanation (uses Gemini)
+    res = _run(
+        [sys.executable, "-m", "aig", "blame", "hello.txt", "1"], cwd=repo, env=env
+    )
+    assert res.returncode == 0, res.stderr
+    assert "Blame output:" in res.stdout
+    assert "▶ Explanation:" in res.stdout

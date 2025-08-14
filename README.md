@@ -264,3 +264,4 @@ This project was inspired by [aicommits](https://github.com/Nutlope/aicommits).
 * AI-powered command autocomplete.
 * Configurable system prompts.
 * Supporting local models.
+* Git bisect automation to pinpoint bug introduction.

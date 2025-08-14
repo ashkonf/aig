@@ -263,3 +263,4 @@ This project was inspired by [aicommits](https://github.com/Nutlope/aicommits).
 * A GitHub PR submission wrapper that automatically generates the title and overview.
 * AI-powered command autocomplete.
 * Configurable system prompts.
+* Supporting local models.

@@ -256,7 +256,7 @@ Thank you for helping improve `aig`!
 
 ## 🙏 Acknowledgements
 
-This project was inspired by [aicommits](https://github.com/Nutlope/aicommits).
+This project was inspired by [aicommits](https://github.com/Nutlope/aicommits) and [@avincenthill](http://github.com/avincenthill).
 
 ## 🗺️ Roadmap
 

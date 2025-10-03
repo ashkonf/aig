@@ -10,7 +10,7 @@
 [![Build Status](https://img.shields.io/github/actions/workflow/status/ashkonf/aig/ci.yml?branch=main)](https://github.com/ashkonf/aig/actions/workflows/ci.yml?query=branch%3Amain)
 [![codecov](https://codecov.io/github/ashkonf/aig/graph/badge.svg?token=7Y596J8IYZ)](https://codecov.io/github/ashkonf/)
 
-**`aig` is a command-line tool that brings the power of Google, OpenAI, and Anthropic to your Git workflow.** It acts as a transparent wrapper around `git`, helping you write better commit messages, understand your commit history, and streamline your development process.
+**`aig` is a command-line tool that brings the power of OpenAI, Anthropic, and Google to your Git workflow.** It acts as a transparent wrapper around `git`, helping you write better commit messages, understand your commit history, and streamline your development process.
 
 </div>
 

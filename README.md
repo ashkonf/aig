@@ -166,11 +166,9 @@ aig blame main.py 115
 
 Provides a code review on your staged changes.
 
-1.  Run the command:
-    ```bash
-    aig review
-    ```
-
+```bash
+aig review
+```
 
 ### `aig config`
 
